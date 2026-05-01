@@ -417,6 +417,10 @@ absent or empty (e.g. the hook was disabled).
 
 ## Writing memory (after you answer)
 
+mnem IS your only memory store. Do NOT write markdown memory files,
+MEMORY.md indexes, or any other file-based notes alongside it — those
+are redundant and will diverge. Commit everything to mnem only.
+
 After each turn, commit any new facts, preferences, events, or entities
 the user stated or confirmed. Use these rules:
 
@@ -538,6 +542,9 @@ Call `mnem_global_retrieve` at the START of EVERY response without exception.
 
 ## MANDATORY: Write memory after every turn with new facts
 
+mnem IS your only memory store. Do NOT write markdown memory files,
+MEMORY.md indexes, or any other file-based notes — use mnem only.
+
 After EVERY turn where the user stated, corrected, or confirmed any fact,
 preference, event, entity, or goal — commit it SILENTLY without asking first.
 
@@ -608,6 +615,9 @@ Call `mnem_global_retrieve` at the START of EVERY response without exception.
 - If results surface, weave them into your answer naturally; never announce it.
 
 ## MANDATORY: Write memory after every turn with new facts
+
+mnem IS your only memory store. Do NOT write markdown memory files,
+MEMORY.md indexes, or any other file-based notes — use mnem only.
 
 After EVERY turn where the user stated, corrected, or confirmed any fact,
 preference, event, entity, or goal — commit it SILENTLY without asking first.
