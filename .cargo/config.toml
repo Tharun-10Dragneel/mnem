@@ -1,0 +1,7 @@
+[alias]
+# Install mnem globally (~/.cargo/bin/mnem). Re-run after code changes to update.
+# Usage: cargo install-mnem
+install-mnem = "install --path crates/mnem-cli --features bundled-embedder"
+
+# Same without bundled embedder (bring your own via .mnem/config.toml).
+install-mnem-bare = "install --path crates/mnem-cli"

@@ -95,6 +95,9 @@ pub(crate) fn run(args: UnintegrateArgs) -> Result<()> {
 }
 
 fn interactive_select(reg: &IntegrationRegistry) -> Result<Vec<Host>> {
+    use anyhow::Context as _;
+    use dialoguer::{MultiSelect, theme::ColorfulTheme};
+
     if reg.hosts.is_empty() {
         println!("No integrations recorded in ~/.mnemglobal/integrations.toml.");
         println!("If you integrated before this version, use a named host:");
@@ -107,46 +110,34 @@ fn interactive_select(reg: &IntegrationRegistry) -> Result<Vec<Host>> {
         return Ok(vec![]);
     }
 
-    println!("Integrated hosts (from ~/.mnemglobal/integrations.toml):");
-    for (i, r) in reg.hosts.iter().enumerate() {
-        let components = if r.components.is_empty() {
-            "mcp".to_string()
-        } else {
-            r.components.join(", ")
-        };
-        println!("  [{}] {} ({})", i + 1, r.display, components);
-    }
-    println!("  [a] all");
-    println!("  [q] quit");
-    print!("Select hosts to remove (e.g. 1,2 or a): ");
-    use std::io::Write as _;
-    std::io::stdout().flush().ok();
+    // Build (host, label) pairs from registry records.
+    let entries: Vec<(Host, String)> = reg
+        .hosts
+        .iter()
+        .filter_map(|r| {
+            Host::parse(&r.slug).map(|h| {
+                let components = if r.components.is_empty() {
+                    "mcp".to_string()
+                } else {
+                    r.components.join(", ")
+                };
+                (h, format!("{}  ({})", r.display, components))
+            })
+        })
+        .collect();
 
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line).ok();
-    let input = line.trim();
+    println!("mnem unintegrate - remove mnem wiring from agent hosts\n");
 
-    if input.eq_ignore_ascii_case("q") || input.is_empty() {
-        return Ok(vec![]);
-    }
-    if input.eq_ignore_ascii_case("a") {
-        return Ok(reg.hosts.iter().filter_map(|r| Host::parse(&r.slug)).collect());
-    }
+    let items: Vec<&str> = entries.iter().map(|(_, s)| s.as_str()).collect();
+    // Default all registered hosts to selected.
+    let defaults: Vec<bool> = vec![true; items.len()];
 
-    let mut selected = Vec::new();
-    for token in input.split(',') {
-        let token = token.trim();
-        if let Ok(n) = token.parse::<usize>() {
-            if n >= 1 && n <= reg.hosts.len() {
-                if let Some(h) = Host::parse(&reg.hosts[n - 1].slug) {
-                    selected.push(h);
-                }
-            } else {
-                eprintln!("  (skipping out-of-range index {n})");
-            }
-        } else {
-            eprintln!("  (skipping unrecognised token {:?})", token);
-        }
-    }
-    Ok(selected)
+    let picks = MultiSelect::with_theme(&ColorfulTheme::default())
+        .with_prompt("Which to remove? (space to toggle, enter to confirm)")
+        .items(&items)
+        .defaults(&defaults)
+        .interact()
+        .context("interactive prompt failed")?;
+
+    Ok(picks.into_iter().map(|i| entries[i].0).collect())
 }

@@ -237,24 +237,56 @@ impl Host {
         }
     }
 
-    /// Path to the markdown file where the host loads its
-    /// project-rules / custom-instructions / system-prompt content
-    /// from disk, or `None` if the host has no file-based mechanism
-    /// (UI-only custom-instructions, Claude Desktop being the
-    /// canonical example). Audit fix (2026-04-26): closes the
-    /// last "user pastes the prompt" seam in the customer flow.
+    /// Path to the file where the host loads its system-prompt /
+    /// project-rules / custom-instructions content from disk.
     ///
-    /// Today: ClaudeCode → `~/.claude/CLAUDE.md` (the user-global
-    /// rules file Claude Code reads on every session). Other hosts
-    /// either lack a stable file location (Cursor's `.cursor/rules/`
-    /// is project-scoped, not user-global) or use a UI-only panel
-    /// (Claude Desktop). They return `None` and the caller falls
-    /// back to the printed-prompt copy-paste flow.
+    /// - ClaudeCode  → `~/.claude/CLAUDE.md` (markdown, marker injection)
+    /// - GeminiCli   → `~/.gemini/GEMINI.md` (markdown, marker injection)
+    /// - Cursor      → `~/.cursor/rules/mnem.mdc` (mdc, we own the file)
+    /// - Continue    → `~/.continue/config.json` (`systemMessage` JSON field)
+    /// - Zed         → settings.json (`assistant.system_prompt` JSON field)
+    /// - ClaudeDesktop → `None` (UI-only custom-instructions panel)
     pub(crate) fn system_prompt_path(self) -> Option<PathBuf> {
         let home = dirs::home_dir()?;
         match self {
             Host::ClaudeCode => Some(home.join(".claude").join("CLAUDE.md")),
+            Host::GeminiCli => Some(home.join(".gemini").join("GEMINI.md")),
+            Host::Cursor => Some(home.join(".cursor").join("rules").join("mnem.mdc")),
+            Host::Continue_ => Some(home.join(".continue").join("config.json")),
+            Host::Zed => {
+                if cfg!(target_os = "macos") {
+                    Some(
+                        home.join("Library")
+                            .join("Application Support")
+                            .join("Zed")
+                            .join("settings.json"),
+                    )
+                } else {
+                    Some(home.join(".config").join("zed").join("settings.json"))
+                }
+            }
             _ => None,
+        }
+    }
+
+    /// How the system prompt is stored for this host.
+    pub(crate) fn system_prompt_kind(self) -> SystemPromptKind {
+        match self {
+            Host::Continue_ => SystemPromptKind::JsonField("systemMessage"),
+            Host::Zed => SystemPromptKind::JsonNestedField("assistant", "system_prompt"),
+            _ => SystemPromptKind::MarkdownMarker,
+        }
+    }
+
+    /// The prompt body to write for this host. Claude Code gets the
+    /// full doc-style prompt (it also has hooks). All other hosts get
+    /// the stronger no-hooks variant that uses MANDATORY language since
+    /// there is no automatic pre-prompt enforcement mechanism.
+    pub(crate) fn system_prompt_content(self) -> &'static str {
+        match self {
+            Host::ClaudeCode => SYSTEM_PROMPT,
+            Host::Cursor => SYSTEM_PROMPT_CURSOR,
+            _ => SYSTEM_PROMPT_NO_HOOKS,
         }
     }
 }
@@ -279,6 +311,20 @@ const fn schema_of(h: Host) -> Schema {
     }
 }
 
+/// Describes how a host's system-prompt location should be read/written.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SystemPromptKind {
+    /// Inject into a markdown / text file using
+    /// `<!-- mnem-system-prompt:v1:start/end -->` markers.
+    MarkdownMarker,
+    /// Inject into a top-level JSON string field.
+    /// e.g. `systemMessage` in Continue's config.json.
+    JsonField(&'static str),
+    /// Inject into a nested JSON string field (parent → child).
+    /// e.g. `assistant.system_prompt` in Zed's settings.json.
+    JsonNestedField(&'static str, &'static str),
+}
+
 // ---------- CLI surface ----------
 
 #[derive(clap::Args, Debug)]
@@ -290,8 +336,9 @@ Examples:
   mnem integrate claude-desktop cursor # wire these two, non-interactive
   mnem integrate --show claude-desktop # print JSON for copy-paste
   mnem integrate --check               # report wired state, mutate nothing
-  mnem integrate --undo claude-desktop # remove mnem from one host
   mnem integrate --all --dry-run       # diff mode; write nothing
+  mnem integrate --no-hooks            # skip hook wiring this run
+  mnem integrate --no-system-prompt    # skip system-prompt wiring this run
 ")]
 pub(crate) struct Args {
     /// Hosts to wire. Omit to enter interactive mode.
@@ -309,10 +356,6 @@ pub(crate) struct Args {
     #[arg(long, value_name = "HOST")]
     pub show: Option<String>,
 
-    /// Remove mnem from HOST's config (or all hosts with `--all`).
-    #[arg(long, value_name = "HOST")]
-    pub undo: Option<String>,
-
     /// Print what would change without writing.
     #[arg(long)]
     pub dry_run: bool,
@@ -322,34 +365,13 @@ pub(crate) struct Args {
     #[arg(long, value_name = "PATH")]
     pub target_repo: Option<PathBuf>,
 
-    /// Audit fix G1/G4 (2026-04-25): print the recommended mnem system
-    /// prompt and exit. Pipe to `pbcopy` / `clip` and paste into your
-    /// host's custom-instructions panel. Non-mutating.
-    #[arg(long = "system-prompt")]
-    pub system_prompt: bool,
+    /// Skip writing the UserPromptSubmit hook even for hosts that support it.
+    #[arg(long = "no-hooks")]
+    pub no_hooks: bool,
 
-    /// Audit fix G2 (2026-04-25): also write a `UserPromptSubmit`
-    /// hook into hosts that support hooks. Today: Claude Code only.
-    /// Other hosts ignore the flag (the hook config is no-op for them).
-    /// The hook calls `mnem retrieve` on every user message and pipes
-    /// results into the LLM's context, giving a guaranteed before-turn
-    /// memory injection that does not depend on the LLM remembering
-    /// to call the tool.
-    #[arg(long = "with-hooks")]
-    pub with_hooks: bool,
-
-    /// Audit fix (2026-04-26): also write the recommended mnem LLM
-    /// system prompt into the host's project-rules file (today:
-    /// `~/.claude/CLAUDE.md` for Claude Code). Closes the last
-    /// "user pastes the prompt" seam in the customer flow. The
-    /// prompt is wrapped in marker comments so re-running replaces
-    /// just the mnem section without clobbering the user's own
-    /// rules. Other hosts that have no file-based rules location
-    /// (Claude Desktop UI-only) silently skip; for those the
-    /// copy-paste flow via `mnem integrate --system-prompt` is
-    /// still the only path.
-    #[arg(long = "with-system-prompt")]
-    pub with_system_prompt: bool,
+    /// Skip writing the mnem system prompt into the host's project-rules file.
+    #[arg(long = "no-system-prompt")]
+    pub no_system_prompt: bool,
 }
 
 /// Recommended mnem system prompt, embedded at compile time so the
@@ -364,32 +386,18 @@ ever having to mention mnem.
 
 ## TL;DR
 
-**Claude Code (one command, fully auto-wired):**
+**Any host (one command, fully auto-wired):**
 
 ```bash
-mnem integrate claude-code --with-hooks --with-system-prompt
+mnem integrate
 ```
 
-This writes the MCP server entry to `~/.claude.json`, the
-`UserPromptSubmit` hook to `~/.claude/settings.json`, and the prompt
-below into a marker-bracketed section of `~/.claude/CLAUDE.md` (your
-existing rules in the file are preserved untouched). Restart Claude
-Code. Done.
+This wires the MCP server entry, the `UserPromptSubmit` hook (for
+hosts that support it, e.g. Claude Code), and the system prompt into
+the host's project-rules file -- all in one shot. Restart the host.
+Done.
 
-**Other hosts (Claude Desktop, Cursor, Continue, Zed, Gemini CLI):**
-
-```bash
-mnem integrate --system-prompt | clip          # Windows
-mnem integrate --system-prompt | pbcopy        # macOS
-mnem integrate --system-prompt | xclip -selection clipboard   # Linux
-```
-
-These hosts have either a UI-only custom-instructions panel (Claude
-Desktop) or no stable user-global rules location (Cursor's
-`.cursor/rules/` is project-scoped). Paste the printed prompt into
-the host's panel manually. `mnem integrate <host>` still wires the
-MCP server entry; `--with-hooks` is a no-op on these hosts (no public
-hook protocol yet).
+Use `--no-hooks` or `--no-system-prompt` to skip individual components.
 
 ## The prompt
 
@@ -425,36 +433,26 @@ the user stated or confirmed. Use these rules:
 - Do NOT commit model output or your own reasoning. Only commit facts the
   user stated or confirmed.
 
-## Node types to use (`ntype` field)
+## Node types (`ntype` field)
 
-| ntype | Use for |
-|---|---|
-| `Fact` | Declarative knowledge about the world or the user |
-| `Preference` | Stated liking, disliking, or ranking |
-| `Event` | Something that happened at a specific time |
-| `Entity:Person` | Named person. Use resolve_or_create, anchor on `name` or `email`. |
-| `Entity:Organization` | Named company / org. Use resolve_or_create, anchor on `name`. |
-| `Entity:Place` | Named place. Use resolve_or_create, anchor on `name`. |
-| `Document` | Longer source text (transcript, PDF chunk, web page). |
-| `Session` | End-of-conversation summary. Write one at session end. |
-| `Goal` | Long-horizon user intention. |
-| `Task` | Unit of work with a `status` prop (`todo`/`in_progress`/`done`/`cancelled`). |
+`ntype` is a free-form string -- use whatever label best describes
+the content. There is no fixed vocabulary. Some common examples:
+
+  `Fact`, `Preference`, `Event`, `Goal`, `Task`, `Session`,
+  `Entity:Person`, `Entity:Organization`, `Entity:Place`,
+  `Document`, `Decision`, `Insight`, `Quote`, `Project`, `Meeting`
+
+Name new types freely when they fit. Prefer colon-namespacing for
+sub-types (`Entity:Person`, `Entity:Org`, `Code:Function`, etc.).
 
 ## Edge predicates
 
-Use verb-phrase, snake_case names that read left-to-right like English.
-The conventional predicates are:
+Use a verb-phrase in snake_case that reads left-to-right like English.
+Any descriptive predicate is valid. Common examples:
 
-| Predicate | Direction | Meaning |
-|---|---|---|
-| `works_at` | Person → Organization | employment |
-| `lives_in` | Person → Place | residence |
-| `has_preference` | Person → Preference | stated preference |
-| `traveling_with` | Event → Person | trip companion |
-| `happened_before` | Event → Event | temporal order |
-| `extracted_from` | Fact → Document/Session | provenance |
-| `mentions` | Document → Entity | co-occurrence |
-| `revoked_by` | OldFact → NewFact | supersession |
+  `works_at`, `lives_in`, `has_preference`, `traveling_with`,
+  `happened_before`, `extracted_from`, `mentions`, `revoked_by`,
+  `relates_to`, `depends_on`, `part_of`, `owned_by`
 
 ## Forgetting
 
@@ -500,30 +498,146 @@ optional and uses them opportunistically. With this prompt, the LLM
 treats them as the default reading and writing channel for facts the
 user shares.
 
-The pre-prompt hook (`mnem integrate --with-hooks claude-code`) gives
-a stronger guarantee: it forces a `mnem_retrieve` call before the LLM
-ever sees the user's message. Pair the two for the strongest "automatic
-memory" experience.
+The pre-prompt hook (wired automatically by `mnem integrate` for
+supported hosts) gives a stronger guarantee: it forces a
+`mnem_global_retrieve` call before the LLM ever sees the user's
+message. Pair the two for the strongest "automatic memory" experience.
 
 ## See also
 
-- [`agent-playbook.md`](./guide/agent-playbook.md) - the underlying
-  policies this prompt encodes (write triggers, shape rules, supersession).
-- [`ntype-vocab.md`](./guide/ntype-vocab.md) - the canonical type
-  vocabulary the prompt references.
-- [`integrate.md`](./guide/integrate.md) - host configuration and the
-  `--system-prompt` / `--with-hooks` flags.
+- [`agent-playbook.md`](./guide/agent-playbook.md) - write triggers, shape rules, supersession.
+- [`integrate.md`](./guide/integrate.md) - host configuration and `mnem integrate` flags.
 - [`mcp.md`](./guide/mcp.md) - the MCP tool reference.
 "#;
 
-pub(crate) fn run(args: Args) -> Result<()> {
-    // --system-prompt: print the recommended LLM system prompt and
-    // bail. Non-mutating, no host wiring. G1/G4 (2026-04-25).
-    if args.system_prompt {
-        print!("{SYSTEM_PROMPT}");
-        return Ok(());
-    }
+/// Stronger, behavioral-only system prompt for hosts without a
+/// `UserPromptSubmit` hook. Uses MANDATORY language because there is
+/// no process-level enforcement — the LLM is the only retrieval trigger.
+const SYSTEM_PROMPT_NO_HOOKS: &str = r#"You have access to mnem, a persistent knowledge graph via MCP tools
+prefixed `mnem_`. Use it transparently on every turn — the user never
+needs to mention mnem.
 
+## MANDATORY: Read memory before every answer
+
+Call `mnem_global_retrieve` at the START of EVERY response without exception.
+- `text` = the user's message, `token_budget` = 2000
+- Never skip: short questions, greetings, code tasks — none are exempt.
+- This host has no automatic pre-prompt hook. YOU are the only retrieval trigger.
+- If results surface, weave them into your answer naturally; never announce it.
+
+## MANDATORY: Write memory after every turn with new facts
+
+After EVERY turn where the user stated, corrected, or confirmed any fact,
+preference, event, entity, or goal — commit it SILENTLY without asking first.
+
+- One fact per node. Never merge two separate facts.
+- `summary` must be a complete standalone sentence (no leading pronouns).
+- Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
+- Connect entities with typed edges: `works_at`, `lives_in`, `has_preference`,
+  `extracted_from`, `revoked_by`, `traveling_with`, `happened_before`, `mentions`.
+- Use `mnem_commit_relation` when both endpoints are named entities.
+- Only commit facts the user stated or confirmed — never your reasoning or drafts.
+- Set `agent_id` to this host's slug on every write (`"cursor"`, `"gemini-cli"`, etc.).
+
+## Node types (`ntype`)
+
+`ntype` is a free-form string — pick whatever label fits. Common examples:
+`Fact`, `Preference`, `Event`, `Goal`, `Task`, `Session`,
+`Entity:Person`, `Entity:Organization`, `Entity:Place`,
+`Decision`, `Insight`, `Project`, `Meeting`.
+Name new types freely; prefer colon-namespacing for sub-types.
+
+## Edge predicates
+
+Use verb-phrase snake_case that reads left-to-right. Any descriptive
+predicate is valid. Common: `works_at`, `lives_in`, `has_preference`,
+`extracted_from`, `revoked_by`, `relates_to`, `depends_on`, `part_of`.
+
+## Forgetting
+
+User says "forget X": `mnem_global_retrieve` to find the node →
+`mnem_tombstone_node` with their wording as `reason`. Reply: "Removed."
+
+## Supersession
+
+User updates a fact: resolve-or-create the new node, then add a `revoked_by`
+edge from the old node to the new. The old fact stops surfacing automatically.
+
+## When NOT to commit
+
+Pure computation results, tool-call traces, generated drafts or code the user
+has not accepted, re-reads within the same turn."#;
+
+/// Cursor-specific variant: identical instructions but prefixed with MDC
+/// frontmatter so Cursor applies the rule globally (`alwaysApply: true`)
+/// rather than matching on file type. Written to `~/.cursor/rules/mnem.mdc`.
+const SYSTEM_PROMPT_CURSOR: &str = r#"---
+description: mnem persistent memory graph — automatic knowledge retrieval and storage
+alwaysApply: true
+---
+
+You have access to mnem, a persistent knowledge graph via MCP tools
+prefixed `mnem_`. Use it transparently on every turn — the user never
+needs to mention mnem.
+
+## MANDATORY: Read memory before every answer
+
+Call `mnem_global_retrieve` at the START of EVERY response without exception.
+- `text` = the user's message, `token_budget` = 2000
+- Never skip: short questions, greetings, code tasks — none are exempt.
+- This host has no automatic pre-prompt hook. YOU are the only retrieval trigger.
+- If results surface, weave them into your answer naturally; never announce it.
+
+## MANDATORY: Write memory after every turn with new facts
+
+After EVERY turn where the user stated, corrected, or confirmed any fact,
+preference, event, entity, or goal — commit it SILENTLY without asking first.
+
+- One fact per node. Never merge two separate facts.
+- `summary` must be a complete standalone sentence (no leading pronouns).
+- Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
+- Connect entities with typed edges: `works_at`, `lives_in`, `has_preference`,
+  `extracted_from`, `revoked_by`, `traveling_with`, `happened_before`, `mentions`.
+- Use `mnem_commit_relation` when both endpoints are named entities.
+- Only commit facts the user stated or confirmed — never your reasoning or drafts.
+- Set `agent_id` to `"cursor"` on every write call.
+
+## Node types (`ntype`)
+
+`ntype` is a free-form string — pick whatever label fits. Common examples:
+`Fact`, `Preference`, `Event`, `Goal`, `Task`, `Session`,
+`Entity:Person`, `Entity:Organization`, `Entity:Place`,
+`Decision`, `Insight`, `Project`, `Meeting`.
+Name new types freely; prefer colon-namespacing for sub-types.
+
+## Edge predicates
+
+Use verb-phrase snake_case that reads left-to-right. Any descriptive
+predicate is valid. Common: `works_at`, `lives_in`, `has_preference`,
+`extracted_from`, `revoked_by`, `relates_to`, `depends_on`, `part_of`.
+
+## Forgetting
+
+User says "forget X": `mnem_global_retrieve` to find the node →
+`mnem_tombstone_node` with their wording as `reason`. Reply: "Removed."
+
+## Supersession
+
+User updates a fact: resolve-or-create the new node, then add a `revoked_by`
+edge from the old node to the new. The old fact stops surfacing automatically.
+
+## When NOT to commit
+
+Pure computation results, tool-call traces, generated drafts or code the user
+has not accepted, re-reads within the same turn."#;
+
+/// Text markers used when injecting into a JSON string field
+/// (Continue `systemMessage`, Zed `assistant.system_prompt`).
+/// Plain-text delimiters that survive JSON serialisation unescaped.
+const JSON_MARKER_START: &str = "[mnem-prompt:start]";
+const JSON_MARKER_END: &str = "[mnem-prompt:end]";
+
+pub(crate) fn run(args: Args) -> Result<()> {
     // --show is the simplest surface: print JSON and bail.
     if let Some(slug) = args.show.as_deref() {
         let host = Host::parse(slug).ok_or_else(|| {
@@ -546,45 +660,6 @@ pub(crate) fn run(args: Args) -> Result<()> {
 
     if args.check {
         return do_check();
-    }
-
-    if let Some(slug) = args.undo.as_deref() {
-        if slug == "all" || args.all {
-            // Run per-host undo but COLLECT failures so the CLI
-            // surfaces them instead of exiting 0 on a half-failed
-            // uninstall. Prior behaviour (`let _ = do_undo(...)`)
-            // silently ate errors per host; if a user asked "remove
-            // mnem from every agent" and half the hosts errored,
-            // they'd never know.
-            let mut failures: Vec<(Host, anyhow::Error)> = Vec::new();
-            for h in Host::all() {
-                if let Err(e) = do_undo(*h, args.dry_run) {
-                    failures.push((*h, e));
-                }
-            }
-            if !failures.is_empty() {
-                for (h, e) in &failures {
-                    eprintln!("undo {}: {e}", h.slug());
-                }
-                anyhow::bail!(
-                    "{} of {} hosts failed to undo",
-                    failures.len(),
-                    Host::all().len()
-                );
-            }
-            return Ok(());
-        } else {
-            let host = Host::parse(slug).ok_or_else(|| {
-                let known = Host::all()
-                    .iter()
-                    .map(|h| h.slug())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                anyhow!("unknown host: {slug}. Known: {known}")
-            })?;
-            do_undo(host, args.dry_run)?;
-        }
-        return Ok(());
     }
 
     let target = resolve_target(args.target_repo.as_deref())?;
@@ -656,10 +731,10 @@ pub(crate) fn run(args: Args) -> Result<()> {
                 println!("  !  {}  {e}", host.display());
             }
         }
-        // G2 (2026-04-25): if --with-hooks, also write the
-        // UserPromptSubmit hook for hosts that support hooks. Today
-        // that's Claude Code only; other hosts skip silently.
-        if args.with_hooks && host.hooks_path().is_some() {
+        // Wire the UserPromptSubmit hook for hosts that support it
+        // unless --no-hooks was passed. Today that's Claude Code only;
+        // other hosts skip silently.
+        if !args.no_hooks && host.hooks_path().is_some() {
             match do_wire_hooks(host, &stamp, args.dry_run) {
                 Ok(WireOutcome::Wrote) => {
                     println!("  ok {}  hooks wired", host.display());
@@ -679,11 +754,10 @@ pub(crate) fn run(args: Args) -> Result<()> {
                 }
             }
         }
-        // 2026-04-26: if --with-system-prompt, also write the mnem
-        // system prompt into the host's project-rules file (today:
-        // Claude Code only). Closes the last copy-paste seam in the
-        // customer flow. Other hosts skip silently.
-        if args.with_system_prompt && host.system_prompt_path().is_some() {
+        // Write the mnem system prompt into the host's project-rules
+        // file unless --no-system-prompt was passed. Hosts without a
+        // file-based rules location (e.g. Claude Desktop) skip silently.
+        if !args.no_system_prompt && host.system_prompt_path().is_some() {
             match do_wire_system_prompt(host, &stamp, args.dry_run) {
                 Ok(WireOutcome::Wrote) => {
                     println!("  ok {}  system prompt wired", host.display());
@@ -713,33 +787,7 @@ pub(crate) fn run(args: Args) -> Result<()> {
     println!("Next steps:");
     println!("  1. Restart each agent host you wired.");
     println!("  2. Verify:  mnem doctor");
-    match (args.with_hooks, args.with_system_prompt) {
-        (true, true) => {
-            // Fully automatic - nothing else to do.
-        }
-        (true, false) => {
-            println!(
-                "  3. Recommended: also write the LLM system prompt to your host's project rules:"
-            );
-            println!(
-                "       a) Auto-write (Claude Code today):    mnem integrate --with-system-prompt"
-            );
-            println!(
-                "       b) Copy-paste into UI panel (others): mnem integrate --system-prompt | clip"
-            );
-        }
-        (false, true) => {
-            println!("  3. Recommended: also add a guaranteed before-prompt memory hook:");
-            println!("       mnem integrate --with-hooks");
-        }
-        (false, false) => {
-            println!("  3. (Recommended) Add the recommended LLM system prompt:");
-            println!("       mnem integrate --with-system-prompt        (auto-write, Claude Code)");
-            println!("       mnem integrate --system-prompt | clip      (copy-paste, all hosts)");
-            println!("  4. (Recommended) Add a guaranteed before-prompt memory hook:");
-            println!("       mnem integrate --with-hooks                (Claude Code today)");
-        }
-    }
+    println!("  3. To remove:  mnem unintegrate");
     // Path A audit fix (2026-04-26): nudge users who installed the
     // minimal CLI toward the bundled-embedder build so semantic
     // retrieve works without an Ollama daemon. The check is at
@@ -872,34 +920,41 @@ fn do_wire(host: Host, target: &Path, stamp: &str, dry_run: bool) -> Result<Wire
 const SYSTEM_PROMPT_MARKER_START: &str = "<!-- mnem-system-prompt:v1:start -->";
 const SYSTEM_PROMPT_MARKER_END: &str = "<!-- mnem-system-prompt:v1:end -->";
 
-/// Write or update the recommended mnem LLM system prompt into the
-/// host's project-rules file (today: Claude Code only). Audit fix
-/// (2026-04-26).
-///
-/// Idempotent: re-running replaces just the marker-bracketed mnem
-/// section, leaving any user-authored rules outside the markers
-/// untouched. Backs up the file before edit (timestamped `.bak-*`).
+/// Write or update the mnem system prompt into the host's rules file.
+/// Dispatches to markdown-marker or JSON-field injection based on
+/// `host.system_prompt_kind()`. Idempotent: re-running replaces only
+/// the mnem-managed block, never touching user content outside it.
 fn do_wire_system_prompt(host: Host, stamp: &str, dry_run: bool) -> Result<WireOutcome> {
     let Some(path) = host.system_prompt_path() else {
         return Ok(WireOutcome::AlreadyWired);
     };
+    match host.system_prompt_kind() {
+        SystemPromptKind::MarkdownMarker => {
+            do_wire_sp_markdown(host, &path, stamp, dry_run)
+        }
+        SystemPromptKind::JsonField(field) => {
+            do_wire_sp_json(host, &path, &[field], stamp, dry_run)
+        }
+        SystemPromptKind::JsonNestedField(parent, child) => {
+            do_wire_sp_json(host, &path, &[parent, child], stamp, dry_run)
+        }
+    }
+}
 
+/// Marker-injection path (ClaudeCode, GeminiCli, Cursor).
+fn do_wire_sp_markdown(host: Host, path: &Path, stamp: &str, dry_run: bool) -> Result<WireOutcome> {
     let existing = if path.exists() {
-        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?
     } else {
         String::new()
     };
 
-    let new_content = merge_system_prompt(&existing, SYSTEM_PROMPT);
+    let new_content = merge_system_prompt(&existing, host.system_prompt_content());
     if new_content == existing {
         return Ok(WireOutcome::AlreadyWired);
     }
 
     if dry_run {
-        // Show only the diff between the surrounding chrome (markers)
-        // and the actual prompt-body change. Full prompt is many KB;
-        // surfacing it inline in dry-run output is more noise than
-        // signal.
         return Ok(WireOutcome::DryRun(format!(
             "     (writing mnem-managed section to {} - \
               {} bytes total, {} bytes changed)",
@@ -917,10 +972,184 @@ fn do_wire_system_prompt(host: Host, stamp: &str, dry_run: bool) -> Result<WireO
             "{}.bak-{stamp}",
             path.extension().and_then(|s| s.to_str()).unwrap_or("md")
         ));
-        fs::copy(&path, &bak).with_context(|| format!("backing up to {}", bak.display()))?;
+        fs::copy(path, &bak).with_context(|| format!("backing up to {}", bak.display()))?;
     }
-    atomic_write(&path, &new_content)?;
+    atomic_write(path, &new_content)?;
     Ok(WireOutcome::Wrote)
+}
+
+/// JSON-field injection path (Continue `systemMessage`, Zed `assistant.system_prompt`).
+/// Reads the JSON config, injects the prompt into the target string field using
+/// `[mnem-prompt:start/end]` text markers, and writes back. Never touches
+/// other fields.
+fn do_wire_sp_json(
+    host: Host,
+    path: &Path,
+    field_path: &[&str],
+    stamp: &str,
+    dry_run: bool,
+) -> Result<WireOutcome> {
+    let existing_text = if path.exists() {
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?
+    } else {
+        String::new()
+    };
+
+    let mut root: Value = if existing_text.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str(&existing_text)
+            .with_context(|| format!("parsing {}", path.display()))?
+    };
+
+    let current_str = json_get_str(&root, field_path).unwrap_or_default().to_string();
+    let new_str = merge_json_prompt(&current_str, host.system_prompt_content());
+
+    if new_str == current_str {
+        return Ok(WireOutcome::AlreadyWired);
+    }
+
+    if dry_run {
+        return Ok(WireOutcome::DryRun(format!(
+            "     (writing mnem prompt block into {}.{} - {} bytes)",
+            path.display(),
+            field_path.join("."),
+            new_str.len()
+        )));
+    }
+
+    json_set_str(&mut root, field_path, new_str);
+    let new_text = serde_json::to_string_pretty(&root).context("serialising config")?;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    if path.exists() {
+        let bak = path.with_extension(format!(
+            "{}.bak-{stamp}",
+            path.extension().and_then(|s| s.to_str()).unwrap_or("json")
+        ));
+        fs::copy(path, &bak).with_context(|| format!("backing up to {}", bak.display()))?;
+    }
+    atomic_write(path, &new_text)?;
+    Ok(WireOutcome::Wrote)
+}
+
+// ---------- JSON field helpers ----------
+
+/// Get a nested string field value, e.g. `["assistant","system_prompt"]`.
+fn json_get_str<'a>(root: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut cur = root;
+    for key in path {
+        cur = cur.get(key)?;
+    }
+    cur.as_str()
+}
+
+/// Set a nested string field, creating intermediate objects as needed.
+fn json_set_str(root: &mut Value, path: &[&str], val: String) {
+    if path.is_empty() {
+        return;
+    }
+    if path.len() == 1 {
+        if let Value::Object(m) = root {
+            m.insert(path[0].to_string(), Value::String(val));
+        }
+        return;
+    }
+    if let Value::Object(m) = root {
+        let entry = m
+            .entry(path[0].to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        json_set_str(entry, &path[1..], val);
+    }
+}
+
+/// Merge the mnem prompt block into a JSON string field value using
+/// `[mnem-prompt:start/end]` text markers. Appends if no markers yet;
+/// replaces between markers on re-runs.
+fn merge_json_prompt(existing: &str, prompt: &str) -> String {
+    let block = format!("\n{}\n{}\n{}", JSON_MARKER_START, prompt.trim_end(), JSON_MARKER_END);
+
+    if let (Some(start), Some(end_start)) =
+        (existing.find(JSON_MARKER_START), existing.find(JSON_MARKER_END))
+    {
+        if end_start > start {
+            let tail = end_start + JSON_MARKER_END.len();
+            return format!("{}{}{}", &existing[..start], &block[1..], &existing[tail..]);
+        }
+    }
+
+    format!("{}{}", existing, block)
+}
+
+/// Remove the `[mnem-prompt:start/end]` block from a JSON string field value.
+fn remove_json_prompt(existing: &str) -> String {
+    if let (Some(start), Some(end_start)) =
+        (existing.find(JSON_MARKER_START), existing.find(JSON_MARKER_END))
+    {
+        if end_start > start {
+            let tail = end_start + JSON_MARKER_END.len();
+            let head = existing[..start].trim_end_matches('\n');
+            let rest = &existing[tail..];
+            if rest.is_empty() {
+                return if head.is_empty() {
+                    String::new()
+                } else {
+                    format!("{head}\n")
+                };
+            }
+            return format!("{head}\n{rest}");
+        }
+    }
+    existing.to_string()
+}
+
+/// Remove the mnem prompt block from a JSON config's string field
+/// and write the result back. Used by `do_undo` for Continue / Zed.
+fn undo_json_prompt(host: Host, path: &Path, field_path: &[&str], dry_run: bool) -> Result<bool> {
+    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut root: Value = if text.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?
+    };
+
+    let current = json_get_str(&root, field_path).unwrap_or_default().to_string();
+    let stripped = remove_json_prompt(&current);
+    if stripped == current {
+        return Ok(false);
+    }
+
+    if dry_run {
+        println!(
+            "  -- {} system prompt (dry-run)\n     (would remove mnem block from {}.{})",
+            host.display(),
+            path.display(),
+            field_path.join(".")
+        );
+        return Ok(true);
+    }
+
+    if stripped.trim().is_empty() {
+        // Remove the field entirely rather than leaving an empty string.
+        if let Value::Object(m) = &mut root {
+            if field_path.len() == 1 {
+                m.remove(field_path[0]);
+            } else if field_path.len() == 2 {
+                if let Some(Value::Object(inner)) = m.get_mut(field_path[0]) {
+                    inner.remove(field_path[1]);
+                }
+            }
+        }
+    } else {
+        json_set_str(&mut root, field_path, stripped);
+    }
+
+    let new_text = serde_json::to_string_pretty(&root).context("serialising config")?;
+    atomic_write(path, &new_text)?;
+    println!("  ok {}  removed mnem system-prompt block", host.display());
+    Ok(true)
 }
 
 /// Merge the mnem system prompt into existing rules-file content.
@@ -1178,38 +1407,47 @@ pub(crate) fn do_undo(host: Host, dry_run: bool) -> Result<()> {
         false
     };
 
-    // 2026-04-26: also remove the marker-bracketed mnem section
-    // from the host's project-rules file if present. User content
-    // outside the markers stays untouched.
+    // Remove the mnem system-prompt block from the host's rules file.
+    // Dispatches on system_prompt_kind(): markdown files use HTML
+    // comment markers; JSON config files use text markers inside a field.
     let prompt_changed = if let Some(pp) = host.system_prompt_path()
         && pp.exists()
     {
-        let s = fs::read_to_string(&pp).with_context(|| format!("reading {}", pp.display()))?;
-        let new_s = remove_system_prompt(&s);
-        if new_s == s {
-            false
-        } else {
-            if dry_run {
-                println!(
-                    "  -- {} system prompt (dry-run)\n     (would shrink to {} bytes)",
-                    host.display(),
-                    new_s.len()
-                );
-            } else if new_s.trim().is_empty() {
-                fs::remove_file(&pp).with_context(|| format!("removing empty {}", pp.display()))?;
-                println!(
-                    "  ok {}  removed mnem system-prompt file ({} now empty)",
-                    host.display(),
-                    pp.display()
-                );
-            } else {
-                atomic_write(&pp, &new_s)?;
-                println!(
-                    "  ok {}  removed mnem system-prompt section",
-                    host.display()
-                );
+        match host.system_prompt_kind() {
+            SystemPromptKind::MarkdownMarker => {
+                let s = fs::read_to_string(&pp)
+                    .with_context(|| format!("reading {}", pp.display()))?;
+                let new_s = remove_system_prompt(&s);
+                if new_s == s {
+                    false
+                } else {
+                    if dry_run {
+                        println!(
+                            "  -- {} system prompt (dry-run)\n     (would shrink to {} bytes)",
+                            host.display(),
+                            new_s.len()
+                        );
+                    } else if new_s.trim().is_empty() {
+                        fs::remove_file(&pp)
+                            .with_context(|| format!("removing empty {}", pp.display()))?;
+                        println!(
+                            "  ok {}  removed mnem system-prompt file ({} now empty)",
+                            host.display(),
+                            pp.display()
+                        );
+                    } else {
+                        atomic_write(&pp, &new_s)?;
+                        println!("  ok {}  removed mnem system-prompt section", host.display());
+                    }
+                    true
+                }
             }
-            true
+            SystemPromptKind::JsonField(field) => {
+                undo_json_prompt(host, &pp, &[field], dry_run)?
+            }
+            SystemPromptKind::JsonNestedField(parent, child) => {
+                undo_json_prompt(host, &pp, &[parent, child], dry_run)?
+            }
         }
     } else {
         false
@@ -1957,13 +2195,21 @@ mod tests {
     }
 
     #[test]
-    fn host_system_prompt_path_only_set_for_claude_code() {
+    fn host_system_prompt_path_coverage() {
+        // Hosts with file-based rules locations return Some.
         assert!(Host::ClaudeCode.system_prompt_path().is_some());
+        assert!(Host::GeminiCli.system_prompt_path().is_some());
+        assert!(Host::Cursor.system_prompt_path().is_some());
+        assert!(Host::Continue_.system_prompt_path().is_some());
+        assert!(Host::Zed.system_prompt_path().is_some());
+        // Claude Desktop has UI-only custom instructions - no file path.
         assert!(Host::ClaudeDesktop.system_prompt_path().is_none());
-        assert!(Host::Cursor.system_prompt_path().is_none());
-        assert!(Host::Continue_.system_prompt_path().is_none());
-        assert!(Host::Zed.system_prompt_path().is_none());
-        assert!(Host::GeminiCli.system_prompt_path().is_none());
+        // Cursor gets a dedicated .mdc file, not the shared config.
+        let cursor_path = Host::Cursor.system_prompt_path().unwrap();
+        assert!(cursor_path.to_string_lossy().contains("mnem.mdc"));
+        // Gemini CLI gets GEMINI.md (analog to CLAUDE.md).
+        let gemini_path = Host::GeminiCli.system_prompt_path().unwrap();
+        assert!(gemini_path.to_string_lossy().contains("GEMINI.md"));
     }
 
     #[test]

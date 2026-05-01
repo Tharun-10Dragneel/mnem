@@ -52,61 +52,80 @@ or jump to [Install](#install) for your platform.
 
 ---
 
-## `mnem integrate` (interactive setup wizard)
+## `mnem integrate` — wire into any agent host
 
 ```bash
-mnem integrate
+mnem integrate                    # interactive: detect + prompt
+mnem integrate --all              # wire every detected host, no prompts
+mnem integrate claude-code        # wire one specific host
+mnem integrate --check            # report wired state, no writes
+mnem integrate --dry-run          # diff what would change, no writes
+mnem integrate --no-hooks         # skip hook wiring
+mnem integrate --no-system-prompt # skip system-prompt wiring
 ```
 
-The shortest path from a fresh checkout to a working agent. Detects
-your environment, prompts for embedder + LLM choice (ONNX bundled /
-Ollama / OpenAI / Cohere / mock), writes `.mnem/config.toml`,
-smoke-tests the result, and offers to wire mnem into every supported
-client in one pass. Around two minutes end to end.
+One command wires **MCP server entry**, **UserPromptSubmit hook**
+(for hosts that support it), and the **mnem system prompt** into the
+host's project-rules file — all in one shot. Restart the host. Done.
 
-Targets: Claude Desktop, Claude Code, Cursor, Continue, Zed, custom MCP
-clients, raw HTTP, raw Python.
+Auto-detects and configures: **Claude Code**, **Claude Desktop**,
+**Cursor**, **Continue**, **Zed**, **Gemini CLI**. Any other MCP-aware
+host works via a hand-edited `mcpServers` entry pointing at
+`mnem mcp serve` (see [`docs/src/mcp.md`](docs/src/mcp.md)).
 
----
-
-## Wire into any MCP client
+To undo:
 
 ```bash
-mnem integrate        # interactive: detect hosts + wire MCP entries
-mnem integrate --all # non-interactive: wire all detected hosts
+mnem unintegrate                  # interactive: pick hosts to remove
+mnem unintegrate claude-code      # remove one host
+mnem unintegrate --all            # remove all wired hosts
 ```
 
-Auto-detects and configures: **Claude Desktop**, **Claude Code**,
-**Cursor**, **Continue**, **Zed**. Any other MCP-aware host works via a
-hand-edited `mcpServers` entry pointing at the `mnem mcp serve`
-subcommand of the unified `mnem` binary (see [`docs/src/mcp.md`](docs/src/mcp.md)).
-
-Restart your client. The agent gets `mnem_retrieve`, `mnem_ingest`,
-`mnem_traverse`, `mnem_stats`, `mnem_remove` (and 6 more) as native
-tools. No extra daemon, no port to manage.
+The agent gets `mnem_retrieve`, `mnem_commit`, `mnem_resolve_or_create`,
+`mnem_global_retrieve`, `mnem_global_add`, `mnem_tombstone_node`,
+`mnem_traverse`, `mnem_stats` (and more) as native tools.
+No extra daemon, no port to manage.
 
 ---
 
 ## Commands
 
+### Setup
+
 | Command | What it does |
 |---------|-------------|
-| `mnem init` | create a new graph in the current dir |
+| `mnem init` | create a new graph in the current directory |
+| `mnem integrate` | wire MCP + hooks + system prompt into detected agent hosts |
+| `mnem integrate --all` | wire all detected hosts, no prompts |
+| `mnem integrate --check` | report wired state; non-mutating |
+| `mnem integrate --dry-run` | diff what would change; write nothing |
+| `mnem integrate --no-hooks` | skip hook wiring |
+| `mnem integrate --no-system-prompt` | skip system-prompt wiring |
+| `mnem integrate --show <host>` | print the JSON config snippet for a host |
+| `mnem unintegrate` | interactive: remove mnem wiring from selected hosts |
+| `mnem unintegrate <host>` | remove one host |
+| `mnem unintegrate --all` | remove all wired hosts |
+| `mnem doctor` | probe embedder + store + config; first-run sanity check |
+
+### Knowledge graph
+
+| Command | What it does |
+|---------|-------------|
 | `mnem ingest <file>` | add nodes from a file (md / pdf / chat-json) |
 | `mnem retrieve <query>` | hybrid retrieval (vector + sparse + graph) |
-| `mnem integrate` | interactive setup: configure embedder, wire MCP hosts |
-| `mnem integrate --check` | report which hosts are wired; non-mutating |
-| `mnem doctor` | probe embedder + store + config; first-run sanity |
+| `mnem global retrieve <query>` | cross-repo semantic search across all registered graphs |
+| `mnem global add` | write nodes/edges directly to the global shared graph |
 | `mnem stats` | nodes, edges, refs, embedder health, repo size |
 | `mnem log` / `diff` / `branch` / `merge` | git-style history ops over the graph |
 | `mnem ref` / `cat-file` / `blame` | inspect refs and individual objects |
 | `mnem export` / `import` | CAR archives for ship-and-load |
-| `mnem mcp serve` | MCP JSON-RPC server over stdio (stdio transport) |
-| `mnem http serve` | HTTP JSON API server (loopback by default) |
 
-`mnem integrate` is the shortest path to a working agent: detects your
-environment, prompts for embedder + LLM choice, writes config,
-smoke-tests the result. Around two minutes end to end.
+### Servers
+
+| Command | What it does |
+|---------|-------------|
+| `mnem mcp serve` | MCP JSON-RPC server over stdio |
+| `mnem http serve` | HTTP JSON API server (loopback by default) |
 
 Full reference: [`docs/src/cli.md`](docs/src/cli.md).
 
@@ -189,13 +208,19 @@ for the MCP server surface.
 git clone https://github.com/Uranid/mnem
 cd mnem
 
-# Build the CLI with bundled embedder (recommended)
-cargo build --release --locked -p mnem-cli --features bundled-embedder
+# Install to ~/.cargo/bin/mnem (globally callable, recommended)
+cargo install --path crates/mnem-cli --features bundled-embedder
 
-# Or build without (bring your own embedder via config.toml)
-cargo build --release --locked -p mnem-cli
+# Shorthand aliases (same thing, from anywhere in the repo):
+cargo install-mnem          # all platforms
+make install                # Linux / macOS only
 
-./target/release/mnem --version
+# Re-run any of the above after pulling changes to update the global binary.
+
+# Without bundled embedder (bring your own via .mnem/config.toml)
+cargo install --path crates/mnem-cli
+
+mnem --version
 ```
 
 Requires Rust 1.95+. If needed: `rustup install 1.95 && rustup default 1.95`.
