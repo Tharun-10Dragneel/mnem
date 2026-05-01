@@ -71,7 +71,7 @@ host's project-rules file — all in one shot. Restart the host. Done.
 Auto-detects and configures: **Claude Code**, **Claude Desktop**,
 **Cursor**, **Continue**, **Zed**, **Gemini CLI**. Any other MCP-aware
 host works via a hand-edited `mcpServers` entry pointing at
-`mnem mcp serve` (see [`docs/src/mcp.md`](docs/src/mcp.md)).
+`mnem mcp --repo <path>` (see [`docs/src/mcp.md`](docs/src/mcp.md)).
 
 To undo:
 
@@ -124,7 +124,7 @@ No extra daemon, no port to manage.
 
 | Command | What it does |
 |---------|-------------|
-| `mnem mcp serve` | MCP JSON-RPC server over stdio |
+| `mnem mcp [--repo <path>]` | MCP JSON-RPC server over stdio |
 | `mnem http serve` | HTTP JSON API server (loopback by default) |
 
 Full reference: [`docs/src/cli.md`](docs/src/cli.md).
@@ -196,8 +196,7 @@ docker run --rm -p 9876:9876 ghcr.io/uranid/mnem:latest http serve
 ```
 
 The image is built with `FEATURES=onnx`; the bundled embedder
-is always present in Docker. Run `mnem mcp serve` inside the container
-for the MCP server surface.
+is always present in Docker. Run `mnem mcp` inside the container for the MCP server surface.
 
 </details>
 

@@ -484,7 +484,8 @@ the user can audit which agent wrote what.
 
 If the `mnem_*` MCP tools are not listed as available, fall back to CLI:
 - **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label Preference`
+- **Write**: `mnem global add node -s "complete sentence" --label <type>`
+  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
 - **NEVER** use bare `mnem commit` or `mnem retrieve` — those operate on
   the local repo store, not the global memory, so facts silently vanish
   the next session.
@@ -576,7 +577,8 @@ edge from the old node to the new. The old fact stops surfacing automatically.
 ## CLI fallback (if MCP tools are unavailable)
 
 - **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label Preference`
+- **Write**: `mnem global add node -s "complete sentence" --label <type>`
+  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
 - **NEVER** use bare `mnem commit` or `mnem retrieve` — those use the
   local repo store; facts will be invisible next session.
 
@@ -646,7 +648,8 @@ edge from the old node to the new. The old fact stops surfacing automatically.
 ## CLI fallback (if MCP tools are unavailable)
 
 - **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label Preference`
+- **Write**: `mnem global add node -s "complete sentence" --label <type>`
+  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
 - **NEVER** use bare `mnem commit` or `mnem retrieve` — those use the
   local repo store; facts will be invisible next session.
 
@@ -1699,7 +1702,7 @@ fn user_prompt_hook_value() -> Value {
 fn mnem_server_value(target: &Path) -> Value {
     json!({
         "command": resolve_mnem_mcp_command(),
-        "args": ["mcp", "serve", "--repo", target.to_string_lossy()]
+        "args": ["mcp", "--repo", target.to_string_lossy()]
     })
 }
 
@@ -1707,7 +1710,7 @@ fn zed_server_value(target: &Path) -> Value {
     json!({
         "command": {
             "path": resolve_mnem_mcp_command(),
-            "args": ["mcp", "serve", "--repo", target.to_string_lossy()]
+            "args": ["mcp", "--repo", target.to_string_lossy()]
         }
     })
 }
@@ -1994,13 +1997,13 @@ mod tests {
 
     #[test]
     fn set_top_level_overwrites_stale_mnem_entry() {
-        // After v0.2.0: args are ["mcp", "serve", "--repo", "<path>"].
+        // Args are ["mcp", "--repo", "<path>"].
         let mut v = json!({
-            "mcpServers": {"mnem": {"command": "mnem", "args": ["mcp", "serve", "--repo", "/old"]}}
+            "mcpServers": {"mnem": {"command": "mnem", "args": ["mcp", "--repo", "/old"]}}
         });
         let changed = set_top_level(&mut v, Path::new("/new"));
         assert!(changed);
-        assert_eq!(v["mcpServers"]["mnem"]["args"][3], json!("/new"));
+        assert_eq!(v["mcpServers"]["mnem"]["args"][2], json!("/new"));
     }
 
     #[test]

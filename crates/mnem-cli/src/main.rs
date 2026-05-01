@@ -307,22 +307,18 @@ Examples:
   mnem bench results ./bench-out                      # re-render RESULTS.md
 ")]
     Bench(commands::bench::BenchArgs),
-    /// Model Context Protocol server commands. Use `mnem mcp serve` to
-    /// expose `mnem_retrieve`, `mnem_ingest`, `mnem_stats`, and 12 more
-    /// tools to any MCP-aware host (Claude Desktop, Cursor, Claude Code,
-    /// Continue, Zed, ...).
+    /// Model Context Protocol server (JSON-RPC over stdio). Exposes
+    /// `mnem_retrieve`, `mnem_commit`, `mnem_global_retrieve`, and 12+
+    /// more tools to any MCP-aware host (Claude Desktop, Cursor, Claude
+    /// Code, Continue, Zed, ...).
     ///
     /// ```bash
-    /// mnem mcp serve                  # auto-detect repo via walk-up
-    /// mnem mcp serve --repo ./my-repo # explicit repo path
+    /// mnem mcp                        # auto-detect repo via walk-up
+    /// mnem mcp --repo ./my-repo       # explicit repo path
     /// ```
     ///
     /// Use `mnem integrate` to auto-wire this into Claude Desktop etc.;
     /// or configure your client's `mcpServers` entry manually.
-    ///
-    /// ```bash
-    /// mnem mcp --repo ./my-repo   # MCP server over stdio
-    /// ```
     Mcp(mcp::serve::ServeArgs),
     /// Serve the HTTP JSON API. Binds to loopback by default; set
     /// `--bind 0.0.0.0:9876` to expose (requires opt-in, see help).
