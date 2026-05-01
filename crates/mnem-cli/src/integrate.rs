@@ -304,7 +304,7 @@ need to mention mnem.
 ## Reading memory (before you answer)
 
 On EVERY user message:
-1. Call `mnem_retrieve` with the user's message as `text` and `token_budget=2000`.
+1. Call `mnem_global_retrieve` with the user's message as `text` and `token_budget=2000`.
 2. If results are returned, weave them into your answer naturally.
 3. If the repo is empty or no relevant results: proceed with training knowledge.
 4. Do not announce that you are consulting memory unless directly asked.
@@ -362,7 +362,7 @@ The conventional predicates are:
 ## Forgetting
 
 When the user says "forget X", "stop remembering X", or revokes consent:
-1. Call `mnem_retrieve` to find the relevant node UUID.
+1. Call `mnem_global_retrieve` to find the relevant node UUID.
 2. Call `mnem_tombstone_node` with the UUID and the user's own phrasing
    as `reason`.
 3. Confirm to the user briefly: "Removed."
@@ -373,7 +373,7 @@ When the user updates a previously stated fact (e.g. "actually I moved
 to Paris" after "I live in Berlin"):
 1. Resolve or create the new fact node.
 2. Add a `revoked_by` edge from the old node to the new one.
-   `mnem_retrieve` filters out revoked nodes by default, so the old
+   `mnem_global_retrieve` filters out revoked nodes by default, so the old
    fact stops surfacing without losing the audit trail.
 
 ## `agent_id`
@@ -521,6 +521,14 @@ pub(crate) fn run(args: Args) -> Result<()> {
     if selected.is_empty() {
         println!("no hosts selected");
         return Ok(());
+    }
+
+    // Set up ~/.mnemglobal after host selection. Interactive mode shows
+    // TUI prompts with defaults in parens. --all / named-host mode
+    // bootstraps silently with defaults (idempotent if already set up).
+    let interactive_global = !args.all && args.hosts.is_empty();
+    if !args.dry_run {
+        setup_global(interactive_global)?;
     }
 
     let stamp = timestamp();
@@ -1164,30 +1172,28 @@ fn do_check() -> Result<()> {
 // ---------- JSON merge helpers ----------
 
 /// Resolve the path we should write into a host's `command` field for
-/// the `mnem-mcp` binary.
+/// the unified `mnem` binary (which exposes `mnem mcp serve` as a
+/// subcommand).
 ///
-/// Audit fix G9 (2026-04-25): the original implementation always wrote
-/// the bare name `"mnem-mcp"`, which silently fails when the binary is
-/// not on `PATH` (a common state right after `cargo build` or for
-/// users who have not aliased the Cargo target dir). We now look for
-/// `mnem-mcp` (or `mnem-mcp.exe` on Windows) next to the current
-/// `mnem` executable; if present, write the absolute path. Otherwise
-/// fall back to the bare name so users who DID install to PATH still
-/// work without surprises.
+/// After the v0.2.0 merge, the MCP server lives at `mnem mcp serve`
+/// inside the main binary. We look for `mnem` (or `mnem.exe` on
+/// Windows) next to the current executable; if present, write the
+/// absolute path. Otherwise fall back to the bare name so users who
+/// DID install to PATH still work without surprises.
 fn resolve_mnem_mcp_command() -> String {
     if let Ok(here) = std::env::current_exe()
         && let Some(dir) = here.parent()
     {
         let candidate = if cfg!(target_os = "windows") {
-            dir.join("mnem-mcp.exe")
+            dir.join("mnem.exe")
         } else {
-            dir.join("mnem-mcp")
+            dir.join("mnem")
         };
         if candidate.exists() {
             return candidate.to_string_lossy().into_owned();
         }
     }
-    "mnem-mcp".to_string()
+    "mnem".to_string()
 }
 
 /// Resolve the path to the `mnem` CLI binary. Same logic as
@@ -1262,7 +1268,7 @@ fn user_prompt_hook_value() -> Value {
 fn mnem_server_value(target: &Path) -> Value {
     json!({
         "command": resolve_mnem_mcp_command(),
-        "args": ["--repo", target.to_string_lossy()]
+        "args": ["mcp", "serve", "--repo", target.to_string_lossy()]
     })
 }
 
@@ -1270,7 +1276,7 @@ fn zed_server_value(target: &Path) -> Value {
     json!({
         "command": {
             "path": resolve_mnem_mcp_command(),
-            "args": ["--repo", target.to_string_lossy()]
+            "args": ["mcp", "serve", "--repo", target.to_string_lossy()]
         }
     })
 }
@@ -1515,23 +1521,22 @@ mod tests {
     }
 
     /// Assert the JSON value parses to a string that names the
-    /// `mnem-mcp` binary, accepting either the bare name (when the
-    /// resolver could not find a colocated binary) or an absolute path
-    /// ending in `mnem-mcp` / `mnem-mcp.exe`. Lets the integrate-test
-    /// suite ride along regardless of whether `cargo test` ran after a
-    /// `cargo build`.
+    /// `mnem` binary (which exposes `mnem mcp serve` as a subcommand).
+    /// Accepts the bare name or an absolute path ending in `mnem` /
+    /// `mnem.exe`. Lets the integrate-test suite ride along regardless
+    /// of whether `cargo test` ran after a `cargo build`.
     fn assert_is_mnem_mcp_command(v: &Value) {
         let s = v
             .as_str()
             .unwrap_or_else(|| panic!("command must be a string; got {v:?}"));
-        let ok = s == "mnem-mcp"
-            || s.ends_with("mnem-mcp")
-            || s.ends_with("mnem-mcp.exe")
-            || s.ends_with("mnem-mcp\\")
-            || s.ends_with("mnem-mcp.exe\\");
+        let ok = s == "mnem"
+            || s.ends_with("/mnem")
+            || s.ends_with("\\mnem")
+            || s.ends_with("/mnem.exe")
+            || s.ends_with("\\mnem.exe");
         assert!(
             ok,
-            "command must be `mnem-mcp` or absolute path to it; got `{s}`"
+            "command must be `mnem` or absolute path to it; got `{s}`"
         );
     }
 
@@ -1564,12 +1569,13 @@ mod tests {
 
     #[test]
     fn set_top_level_overwrites_stale_mnem_entry() {
+        // After v0.2.0: args are ["mcp", "serve", "--repo", "<path>"].
         let mut v = json!({
-            "mcpServers": {"mnem": {"command": "mnem-mcp", "args": ["--repo", "/old"]}}
+            "mcpServers": {"mnem": {"command": "mnem", "args": ["mcp", "serve", "--repo", "/old"]}}
         });
         let changed = set_top_level(&mut v, Path::new("/new"));
         assert!(changed);
-        assert_eq!(v["mcpServers"]["mnem"]["args"][1], json!("/new"));
+        assert_eq!(v["mcpServers"]["mnem"]["args"][3], json!("/new"));
     }
 
     #[test]
@@ -1859,13 +1865,13 @@ mod tests {
     #[test]
     fn resolve_mnem_mcp_command_falls_back_to_bare_name_in_test_env() {
         // In the test runner, `current_exe()` lives in
-        // target/debug/deps/, not the same dir as `mnem-mcp`. The
+        // target/debug/deps/, not the same dir as `mnem`. The
         // resolver must therefore fall back to the bare name. If a
-        // future change makes the test binary live next to mnem-mcp,
+        // future change makes the test binary live next to mnem,
         // this test will start returning the absolute path; either
         // outcome is correct, so we accept both.
         let cmd = resolve_mnem_mcp_command();
-        let ok = cmd == "mnem-mcp" || cmd.ends_with("mnem-mcp") || cmd.ends_with("mnem-mcp.exe");
+        let ok = cmd == "mnem" || cmd.ends_with("/mnem") || cmd.ends_with("\\mnem") || cmd.ends_with("/mnem.exe") || cmd.ends_with("\\mnem.exe");
         assert!(ok, "resolver returned unexpected value: {cmd}");
     }
 
@@ -1878,4 +1884,101 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
         fs::remove_file(&path).ok();
     }
+}
+
+// ---------- Global graph setup ----------
+
+/// Set up `~/.mnemglobal/` during `mnem integrate`.
+///
+/// `interactive = true`  → TUI prompts with defaults shown in parens;
+///                          user can press Enter to accept every default.
+/// `interactive = false` → silent bootstrap with defaults (--all / named hosts).
+fn setup_global(interactive: bool) -> Result<()> {
+    use dialoguer::{Input, Select, theme::ColorfulTheme};
+
+    let default_dir = crate::global::default_dir();
+
+    // Step 1: ask where the global graph should live.
+    let global_dir: PathBuf = if interactive {
+        println!("\nmnem global graph");
+        println!("─────────────────");
+        let raw: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!(
+                "Global mnem graph location ({})",
+                default_dir.display()
+            ))
+            .allow_empty(true)
+            .interact_text()
+            .context("global dir prompt failed")?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            default_dir
+        } else {
+            PathBuf::from(trimmed)
+        }
+    } else {
+        default_dir
+    };
+
+    // Step 2: bootstrap (create dir + init .mnem if not already present).
+    let fresh = crate::global::bootstrap(&global_dir)
+        .with_context(|| format!("bootstrapping {}", global_dir.display()))?;
+
+    if fresh || interactive {
+        println!(
+            "  ok global graph  {}",
+            global_dir.join(crate::repo::MNEM_DIR).display()
+        );
+    }
+
+    // Step 3: ask which repo should be the default for `mnem` without -R.
+    let mut reg = crate::global::RepoRegistry::load(&global_dir)?;
+
+    // Skip the prompt if a default is already pinned and we're not interactive.
+    if reg.repos.iter().any(|e| e.default) && !interactive {
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| global_dir.clone());
+    let mut choices: Vec<(String, PathBuf)> = vec![(
+        format!(
+            "{}  (the global graph itself, good for personal notes)",
+            global_dir.display()
+        ),
+        global_dir.clone(),
+    )];
+    if cwd != global_dir {
+        choices.push((
+            format!("{}  (current directory)", cwd.display()),
+            cwd,
+        ));
+    }
+
+    let default_repo = if interactive {
+        let items: Vec<&str> = choices.iter().map(|(s, _)| s.as_str()).collect();
+        let idx = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Default repo for `mnem` without -R")
+            .items(&items)
+            .default(0)
+            .interact()
+            .context("default repo prompt failed")?;
+        choices.remove(idx).1
+    } else {
+        global_dir.clone()
+    };
+
+    reg.register(&default_repo, true);
+    reg.save(&global_dir)
+        .with_context(|| {
+            format!(
+                "saving {}",
+                crate::global::registry_path(&global_dir).display()
+            )
+        })?;
+
+    if interactive || fresh {
+        println!("  ok default repo  {}", default_repo.display());
+    }
+
+    Ok(())
 }

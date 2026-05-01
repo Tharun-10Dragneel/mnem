@@ -20,7 +20,7 @@
 //!      `--features bundled-embedder`. Off otherwise.
 //!
 //! Mirrors mnem-cli's `config::resolve_embedder` (without the
-//! user-global `~/.mnem/config.toml` tier - mnem-mcp's design point
+//! user-global `~/.mnem/config.toml` tier - mnem mcp's design point
 //! is per-repo isolation, and the existing community_summarize
 //! handler did not consult global config either).
 

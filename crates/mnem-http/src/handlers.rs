@@ -1,4 +1,4 @@
-//! Axum handlers for `mnem-http`'s v1 surface.
+//! Axum handlers for `mnem http`'s v1 surface.
 //!
 //! Keep all handlers synchronous inside the lock. We deliberately hold
 //! a `std::sync::Mutex` across blocking mnem-core calls rather than a
@@ -14,7 +14,7 @@
 // POST /remote/v1/push-blocks -> accept a CAR, verify signatures
 // POST /remote/v1/advance-head -> CAS a ref to a new CID
 // The protocol is source-agnostic: a hosted Uranid plane is one implementation,
-// self-hosted mnem-http is another, `file://` is a third. See
+// self-hosted mnem http is another, `file://` is a third. See
 // `docs/ROADMAP.md#remote-v0-work-items-tracked-inline-in-src`
 // item 1 and ().
 
@@ -107,7 +107,7 @@ pub(crate) async fn healthz() -> Json<Value> {
     Json(json!({
     "schema": "mnem.v1.healthz",
     "ok": true,
-    "service": "mnem-http",
+    "service": "mnem http",
     "version": env!("CARGO_PKG_VERSION"),
     }))
 }
@@ -257,7 +257,7 @@ pub(crate) async fn post_node(
     let commit_start = std::time::Instant::now();
     let new_repo = tx.commit(
         &author,
-        body.message.as_deref().unwrap_or("mnem-http add node"),
+        body.message.as_deref().unwrap_or("mnem http add node"),
     )?;
     s.metrics
         .commit_duration
@@ -359,7 +359,7 @@ pub(crate) async fn delete_node(
     let commit_start = std::time::Instant::now();
     let new_repo = tx.commit(
         &q.author,
-        q.message.as_deref().unwrap_or("mnem-http delete node"),
+        q.message.as_deref().unwrap_or("mnem http delete node"),
     )?;
     s.metrics
         .commit_duration
@@ -415,7 +415,7 @@ pub(crate) async fn tombstone_node(
     let mut tx = guard.start_transaction();
     tx.tombstone_node(id, body.reason.clone())?;
     let commit_start = std::time::Instant::now();
-    let new_repo = tx.commit(&body.author, "mnem-http tombstone node")?;
+    let new_repo = tx.commit(&body.author, "mnem http tombstone node")?;
     s.metrics
         .commit_duration
         .observe(commit_start.elapsed().as_secs_f64());
@@ -605,7 +605,7 @@ pub(crate) async fn post_nodes_bulk(
     let commit_start = std::time::Instant::now();
     let new_repo = tx.commit(
         &body.author,
-        body.message.as_deref().unwrap_or("mnem-http bulk add"),
+        body.message.as_deref().unwrap_or("mnem http bulk add"),
     )?;
     s.metrics
         .commit_duration

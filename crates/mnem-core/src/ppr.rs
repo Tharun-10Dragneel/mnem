@@ -9,7 +9,7 @@
 //!
 //! 1. guarantee byte-determinism across platforms (no third-party SIMD
 //!    scheduler surprise),
-//! 2. hold the binary-size delta for the `mnem-http` release build
+//! 2. hold the binary-size delta for the `mnem http` subcommand
 //!    under 100 KiB (E2 T2 gate),
 //! 3. drop the algorithm into WASM builds later without auditing a new
 //!    transitive graph.

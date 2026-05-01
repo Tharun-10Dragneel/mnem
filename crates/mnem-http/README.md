@@ -1,4 +1,4 @@
-# mnem-http
+# mnem http
 
 HTTP JSON API for mnem - REST surface over the core repo operations.
 
@@ -14,7 +14,7 @@ binary binds to loopback by default and emits a loud stderr warning when
 exposed to a network interface, since v1 has no auth layer.
 
 ```bash
-mnem-http --repo /path/to/project --bind 127.0.0.1:9876
+mnem http --repo /path/to/project --bind 127.0.0.1:9876
 ```
 
 Workspace top: [`../../README.md`](../../README.md). Spec:

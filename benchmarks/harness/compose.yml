@@ -1,6 +1,7 @@
-# Bench harness: 4 thread-pinned mnem-http lanes for parallel bench runs.
+# Bench harness: 4 thread-pinned lanes for parallel bench runs.
 # Image is built from the repo root Dockerfile with FEATURES=onnx-bundled
 # so the in-process MiniLM-L6-v2 embedder is baked in (no network).
+# After v0.2.0: the server runs `mnem http serve` (subcommand).
 #
 # Usage:
 #   docker compose -f benchmarks/harness/compose.yml up -d
@@ -15,8 +16,8 @@ x-bench-base: &bench-base
     dockerfile: Dockerfile
     args:
       FEATURES: "onnx-bundled"
-  image: mnem-http:bench-onnx-minilm
-  command: ["--in-memory", "--bind", "0.0.0.0:9876", "--repo", "/data"]
+  image: mnem:bench-onnx-minilm
+  command: ["http", "serve", "--in-memory", "--bind", "0.0.0.0:9876", "--repo", "/data"]
   volumes:
     - ./config.toml:/data/.mnem/config.toml:ro
   environment: &bench-env

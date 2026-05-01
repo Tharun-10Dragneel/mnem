@@ -1,10 +1,11 @@
 //! `mnem doctor` - non-mutating health check.
 //!
-//! Reports on: the `mnem` / `mnem-mcp` binaries on PATH, the current
+//! Reports on: the `mnem` binary on PATH, the current
 //! repo's data dir + redb readability, the on-disk config, the
 //! configured embedding provider's reachability, and which agent hosts
-//! are wired via `mnem integrate`. Designed to be the first thing a
-//! support thread asks for.
+//! are wired via `mnem integrate`. After v0.2.0, the MCP server lives
+//! at `mnem mcp serve` (subcommand inside the unified binary). Designed
+//! to be the first thing a support thread asks for.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -109,9 +110,13 @@ fn check_binaries() -> Vec<Check> {
     // *itself* not on PATH yet doctor still works fine. Treat that
     // as Info, not Fail: the absolute-path invocation is supported
     // and reporting "not on PATH" is technically true but unhelpful.
+    // After v0.2.0, `mnem mcp serve` is a subcommand inside the
+    // unified binary. Only the `mnem` binary check matters;
+    // the `mnem mcp` row is kept for backward compat with
+    // pre-v0.2.0 `mnem integrate` invocations.
     let running_exe = std::env::current_exe().ok();
     let running_dir = running_exe.as_deref().and_then(|p| p.parent());
-    for bin in ["mnem", "mnem-mcp"] {
+    for bin in ["mnem"] {
         let found = which(bin);
         out.push(match found {
             Some(p) => Check {
@@ -122,10 +127,12 @@ fn check_binaries() -> Vec<Check> {
                 fix: None,
             },
             None => {
-                // Detect the "running from absolute path" case: only
-                // applies to the `mnem` row (the row that matches the
-                // currently-running binary's stem). `mnem-mcp` always
-                // falls through to the standard "not on PATH" Fail.
+                // After v0.2.0: `mnem mcp serve` is a subcommand inside the
+                // unified `mnem` binary. Only the `mnem` binary row matters
+                // for the check. Three mutually exclusive states:
+                // 1. Running from absolute path (Info — no PATH needed)
+                // 2. Sibling binary exists (Ok — adjacent to the running binary)
+                // 3. Neither → Fail with install hint.
                 let is_running_self = running_exe
                     .as_ref()
                     .and_then(|p| p.file_stem())
@@ -147,15 +154,6 @@ fn check_binaries() -> Vec<Check> {
                         fix: None,
                     }
                 } else if let Some(adjacent) = adjacent_binary(running_dir, bin) {
-                    // audit-2026-04-25 C6-3: when `mnem` is invoked by
-                    // absolute path out of a `target/release/` (or any
-                    // built `bin/`) directory, `mnem-mcp.exe` typically
-                    // sits right next to it. PATH lookup misses it but
-                    // the binary IS available - reporting `fail` is
-                    // misleading. If we can find an adjacent binary,
-                    // report `ok (running adjacent)` so the user sees
-                    // the working invocation path instead of a fix hint
-                    // that doesn't match their actual layout.
                     Check {
                         section: "binaries",
                         name: bin.to_string(),
@@ -174,8 +172,7 @@ fn check_binaries() -> Vec<Check> {
                         detail: "not on PATH".to_string(),
                         fix: Some(format!(
                             "install via `cargo install mnem-cli` (or `cargo binstall mnem-cli` for prebuilt), \
-                             `pip install mnem-py`, `brew tap uranid/tap && brew install mnem`, \
-                             or add the directory containing `{bin}` to PATH"
+                             `pip install mnem-cli`, or add the directory containing `{bin}` to PATH"
                         )),
                     }
                 }
@@ -187,9 +184,8 @@ fn check_binaries() -> Vec<Check> {
 
 /// Probe `dir` for a sibling executable named `bin` (with the host's
 /// `EXE_SUFFIX` appended on Windows). Returns the resolved path if and
-/// only if the file exists. Used by the binaries check so that an
-/// absolute-path `mnem` invocation out of `target/release/` doesn't
-/// flag its sibling `mnem-mcp.exe` as missing.
+/// only if the file exists. After v0.2.0, the MCP server is a subcommand
+/// inside the unified binary, so this is only used for the `mnem` row.
 fn adjacent_binary(dir: Option<&Path>, bin: &str) -> Option<PathBuf> {
     let dir = dir?;
     let mut candidate = dir.join(bin);
@@ -821,13 +817,13 @@ mod tests {
 
     #[test]
     fn adjacent_binary_finds_sibling_with_exe_suffix() {
-        // audit-2026-04-25 C6-3: simulate the layout of
-        // `target/release/{mnem.exe, mnem-mcp.exe}` and assert that
-        // adjacent_binary("target/release/", "mnem-mcp") finds the
-        // sibling regardless of host-specific EXE_SUFFIX.
+        // After v0.2.0: adjacent_binary is only used for the `mnem` row
+        // (the MCP server is now a subcommand, not a sibling binary).
+        // Test: simulate `target/release/{mnem.exe, some-binary.exe}` and
+        // assert adjacent_binary finds the sibling.
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
-        let bin = "mnem-mcp-fake";
+        let bin = "mnem-fake";
         let with_suffix = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
         std::fs::write(dir.join(&with_suffix), b"#!/bin/sh\nexit 0\n").unwrap();
 
@@ -846,7 +842,7 @@ mod tests {
 
     #[test]
     fn adjacent_binary_returns_none_when_dir_is_none() {
-        assert!(adjacent_binary(None, "mnem-mcp").is_none());
+        assert!(adjacent_binary(None, "mnem").is_none());
     }
 }
 

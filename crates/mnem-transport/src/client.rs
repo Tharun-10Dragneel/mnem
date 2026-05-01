@@ -8,7 +8,7 @@
 //!
 //! ## Trait
 //!
-//! [`RemoteClient`] is the async surface mnem-cli / mnem-http talk to.
+//! [`RemoteClient`] is the async surface mnem-cli / mnem http talk to.
 //! It is async-trait free: the associated-type-position `-> impl
 //! Future` shape needs `trait-return-impl-trait` which is stable but
 //! noisy on older toolchains; we use a concrete `Pin<Box<dyn
@@ -59,7 +59,7 @@ use crate::secret_token::SecretToken;
 /// stable Rust without pulling in `async-trait`.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Async surface mnem-cli / mnem-http talk to when speaking to a
+/// Async surface mnem-cli / mnem http talk to when speaking to a
 /// remote peer. Every method corresponds to one of the four wire
 /// verbs documented in the module-level docs.
 ///

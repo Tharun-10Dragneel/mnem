@@ -39,7 +39,7 @@ pub struct Server {
     ///      for benchmark harnesses.
     ///   3. else: `true`.
     ///
-    /// Parity with `mnem-http`'s `AppState::allow_labels`.
+    /// Parity with `mnem http`'s `AppState::allow_labels`.
     pub allow_labels: bool,
 }
 
@@ -145,6 +145,19 @@ impl Server {
         }
     }
 
+    /// Open any `.mnem/` data directory as a `ReadonlyRepo` without
+    /// touching `self`. Used by handlers that need to peek at a second
+    /// repo (e.g. the global anchor graph) alongside the current one.
+    pub(crate) fn open_repo_at(data_dir: &std::path::Path) -> anyhow::Result<ReadonlyRepo> {
+        let redb_path = data_dir.join("repo.redb");
+        let (bs, ohs, _file) = open_or_init(&redb_path)?;
+        match ReadonlyRepo::open(bs.clone(), ohs.clone()) {
+            Ok(r) => Ok(r),
+            Err(e) if e.is_uninitialized() => ReadonlyRepo::init(bs, ohs).map_err(Into::into),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Accessor for tools that need direct access to the underlying
     /// stores (e.g. to start a transaction).
     pub(crate) fn stores(
@@ -223,7 +236,7 @@ impl Server {
                     "tools": {}
                 },
                 "serverInfo": {
-                    "name": "mnem-mcp",
+                    "name": "mnem mcp",
                     "version": env!("CARGO_PKG_VERSION"),
                 }
             }),

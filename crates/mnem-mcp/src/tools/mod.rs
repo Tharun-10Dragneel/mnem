@@ -35,7 +35,7 @@ use crate::server::Server;
 
 // ---------- input clamps ----------
 //
-// Mirror the ceilings applied in mnem-http. MCP tool args are as
+// Mirror the ceilings applied in mnem http. MCP tool args are as
 // untrusted as an HTTP body: a caller is free to send
 // `limit=u64::MAX` and hope the downstream allocator gives it a
 // fatal headache.
@@ -70,6 +70,8 @@ pub(crate) fn dispatch(server: &mut Server, name: &str, args: Value) -> Result<S
         "mnem_recent" => handlers::recent::recent(server, args),
         "mnem_vector_search" => handlers::vector_search::vector_search(server, args),
         "mnem_retrieve" => handlers::retrieve::retrieve(server, args),
+        "mnem_global_retrieve" => handlers::global_retrieve::global_retrieve(server, args),
+        "mnem_global_add" => handlers::global_add::global_add(server, args),
         "mnem_ingest" => handlers::ingest::ingest(server, args),
         #[cfg(feature = "summarize")]
         "mnem_community_summarize" => {
@@ -366,8 +368,8 @@ mod mnem_bench_gate_tests {
         // Both outputs carry `label:  Node` (the default), not
         // Person/Robot.
         assert!(
-            v1.contains(&format!("label:  {}", Node::DEFAULT_NTYPE))
-                && v2.contains(&format!("label:  {}", Node::DEFAULT_NTYPE)),
+            v1.contains(&format!("label:         {}", Node::DEFAULT_NTYPE))
+                && v2.contains(&format!("label:         {}", Node::DEFAULT_NTYPE)),
             "both resolve_or_create calls should land on default ntype when MNEM_BENCH off; got v1={v1} v2={v2}"
         );
     }

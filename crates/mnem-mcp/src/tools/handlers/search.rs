@@ -16,7 +16,7 @@ use serde_json::Value;
 pub(in crate::tools) fn search(server: &mut Server, args: Value) -> Result<String> {
     // `label` is gated behind `MNEM_BENCH`. When the gate is off,
     // caller-supplied values are silently dropped so the search runs
-    // unscoped. Parity with POST /v1/retrieve in mnem-http.
+    // unscoped. Parity with POST /v1/retrieve in mnem http.
     let allow_labels = server.allow_labels;
     let repo = server.load_repo()?;
     let label = if allow_labels {

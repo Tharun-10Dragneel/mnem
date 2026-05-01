@@ -1,7 +1,7 @@
-//! `mnem-http` - stand-alone binary that serves the HTTP JSON API.
+//! `mnem http` - stand-alone binary that serves the HTTP JSON API.
 //!
 //! ```shell
-//! mnem-http --repo /path/to/project --bind 127.0.0.1:9876
+//! mnem http --repo /path/to/project --bind 127.0.0.1:9876
 //! ```
 //!
 //! Binds to loopback by default; exposing to a network interface emits a
@@ -15,7 +15,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(
-    name = "mnem-http",
+    name = "mnem http",
     version,
     about = "HTTP JSON API for mnem.",
     long_about = None
@@ -40,7 +40,7 @@ struct Cli {
     /// Default behaviour (matching the R1 observability scorer's H3
     /// recommendation): ON for non-loopback binds so a production
     /// deployment gets metrics out of the box; OFF for loopback binds
-    /// so a developer's local `mnem-http` does not expose scrape data
+    /// so a developer's local `mnem http` does not expose scrape data
     /// to other processes on their machine unless they opt in.
     ///
     /// The in-process counters always run (they are lock-free atomics
@@ -70,16 +70,16 @@ async fn main() -> Result<()> {
     // greppable.
     if !cli.bind.ip().is_loopback() && std::env::var_os("MNEM_HTTP_ALLOW_NON_LOOPBACK").is_none() {
         eprintln!(
-            "mnem-http: refusing to bind non-loopback address {} without an explicit opt-in.\n\
+            "mnem http: refusing to bind non-loopback address {} without an explicit opt-in.\n\
              \n\
-             mnem-http has NO authentication layer in v1. Binding to a non-loopback address\n\
+             mnem http has NO authentication layer in v1. Binding to a non-loopback address\n\
              (like 0.0.0.0 or a LAN IP) exposes every node, every retrieval, and every\n\
              write endpoint to anyone who can reach the interface.\n\
              \n\
              If you really do want to bind publicly (e.g. behind a reverse proxy that\n\
              adds auth), set MNEM_HTTP_ALLOW_NON_LOOPBACK=1 in the environment:\n\
              \n\
-             \tMNEM_HTTP_ALLOW_NON_LOOPBACK=1 mnem-http --bind {}\n\
+             \tMNEM_HTTP_ALLOW_NON_LOOPBACK=1 mnem http --bind {}\n\
              \n\
              Loopback (127.0.0.1, ::1) needs no flag.\n\
              \n\
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
     }
     if !cli.bind.ip().is_loopback() {
         eprintln!(
-            "mnem-http: binding to non-loopback {} under MNEM_HTTP_ALLOW_NON_LOOPBACK. \
+            "mnem http: binding to non-loopback {} under MNEM_HTTP_ALLOW_NON_LOOPBACK. \
              There is NO auth layer; front this with a reverse proxy that adds one.",
             cli.bind
         );
@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
         },
     )?;
     let listener = tokio::net::TcpListener::bind(cli.bind).await?;
-    println!("mnem-http listening on http://{}", cli.bind);
+    println!("mnem http listening on http://{}", cli.bind);
     // audit-2026-04-25 P2-7: enumerate every mounted route from the
     // single source of truth (mnem_http::route_table) so the banner
     // and the router can never drift apart again.
@@ -181,7 +181,7 @@ fn init_tracing() {
         }
         other => {
             eprintln!(
-                "mnem-http: unrecognised MNEM_LOG_FORMAT={other:?}; falling back to `text`. Valid values: text | json."
+                "mnem http: unrecognised MNEM_LOG_FORMAT={other:?}; falling back to `text`. Valid values: text | json."
             );
             tracing_subscriber::fmt().with_env_filter(env_filter).init();
         }
@@ -208,5 +208,5 @@ async fn shutdown_signal() {
         () = ctrl_c => {},
         () = terminate => {},
     }
-    println!("mnem-http: shutdown signal; draining...");
+    println!("mnem http: shutdown signal; draining...");
 }

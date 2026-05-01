@@ -60,7 +60,7 @@ pub fn hash_to_cid<T: Serialize>(value: &T) -> Result<(Bytes, Cid), CodecError> 
 /// Maximum nesting depth [`extract_links`] will traverse.
 ///
 /// Matches the `json_to_ipld` cap in the mnem-http / mnem-cli /
-/// mnem-mcp input paths so a payload that round-trips through either
+/// mnem mcp input paths so a payload that round-trips through either
 /// layer behaves consistently. Nothing in mnem's typed object set
 /// nests past ~8 (commit -> view -> keys -> entry -> props -> list),
 /// so 64 is ~8x the deepest legitimate shape while keeping attacker

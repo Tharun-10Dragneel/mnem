@@ -148,7 +148,7 @@ impl BruteForceVectorIndex {
 
     /// Model identifier this index is bound to (e.g.
     /// `"openai:text-embedding-3-small"`). Exposed so downstream
-    /// consumers (e.g. the KNN-edge derivation in mnem-http's
+    /// consumers (e.g. the KNN-edge derivation in mnem http's
     /// `GraphCache`) can tag their derived artefacts with the same
     /// model string the vectors were indexed under.
     #[must_use]
@@ -174,7 +174,7 @@ impl BruteForceVectorIndex {
     /// is borrowed from the flat row-major buffer; every row is
     /// already L2-normalised so cosine == dot product.
     ///
-    /// Used by mnem-http's `GraphCache` KNN-edge fallback to derive
+    /// Used by mnem http's `GraphCache` KNN-edge fallback to derive
     /// a deterministic KNN-edge substrate when the authored-edges
     /// adjacency is empty (experiment E0 wire activation). Returning a
     /// borrowed slice avoids the per-row `to_vec()` clone the HNSW

@@ -16,7 +16,7 @@ use serde_json::Value;
 pub(in crate::tools) fn retrieve(server: &mut Server, args: Value) -> Result<String> {
     // `label` gated behind `MNEM_BENCH`. Off by default: the filter is
     // silently ignored so retrieve runs unscoped (parity with
-    // GET/POST /v1/retrieve in mnem-http).
+    // GET/POST /v1/retrieve in mnem http).
     let allow_labels = server.allow_labels;
     let repo = server.load_repo()?;
     let mut r = repo.retrieve();
@@ -84,7 +84,7 @@ pub(in crate::tools) fn retrieve(server: &mut Server, args: Value) -> Result<Str
     if let Some(budget) = args.get("token_budget").and_then(Value::as_u64) {
         r = r.token_budget(budget.min(u64::from(u32::MAX)) as u32);
     }
-    // Input clamps mirror mnem-http: MCP tool args are as untrusted
+    // Input clamps mirror mnem http: MCP tool args are as untrusted
     // as an HTTP body. Without a ceiling, a caller can send
     // `limit=18446744073709551615` and trigger whatever the
     // downstream BruteForce vector search allocates. See

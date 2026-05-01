@@ -1,0 +1,48 @@
+{
+  "name": "@uranid/mnem",
+  "version": "0.2.0",
+  "description": "Git for knowledge graphs - versioned, content-addressed, embeddable agent memory",
+  "author": "mnem contributors",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Uranid/mnem#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Uranid/mnem.git"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "memory",
+    "agent",
+    "rag",
+    "embeddings",
+    "mcp",
+    "ai"
+  ],
+  "bin": {
+    "mnem": "./bin/mnem"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,19 +1,20 @@
 //! Integration tests for `mnem fetch` / `push` / `pull` against a
-//! live `mnem-http` server.
+//! live HTTP server.
 //!
-//! These tests spin up a real `mnem-http` subprocess on a loopback
-//! ephemeral port, `mnem remote add` against it from a second
-//! TempDir, then exercise the three wire verbs end-to-end.
+//! After the v0.2.0 merge, the server is `mnem http serve` (subcommand
+//! inside the unified `mnem` binary). These tests spin up a real server
+//! on a loopback ephemeral port, `mnem remote add` against it from a
+//! second TempDir, then exercise the three wire verbs end-to-end.
 //!
 //! # Harness
 //!
 //! [`HttpServer::spawn`] pre-binds a `TcpListener` on `127.0.0.1:0`,
 //! takes the kernel-allocated port, drops the listener, then launches
-//! `cargo_bin("mnem-http")` with `--bind 127.0.0.1:<port>`. There is
-//! a small race window between the drop and the child's `bind`; we
-//! cover it by polling `GET /v1/healthz` up to a few seconds. If the
-//! port is grabbed by another process in that gap the test fails
-//! fast with a diagnostic rather than hanging.
+//! `mnem http serve` with `--bind 127.0.0.1:<port>`. There is a small
+//! race window between the drop and the child's `bind`; we cover it
+//! by polling `GET /v1/healthz` up to a few seconds. If the port is
+//! grabbed by another process in that gap the test fails fast with a
+//! diagnostic rather than hanging.
 //!
 //! # Auth
 //!
@@ -48,7 +49,7 @@ const TEST_TOKEN: &str = "b3-integration-token";
 
 // ---------- Test harness ----------
 
-/// RAII handle for a spawned `mnem-http` subprocess. `Drop` sends
+/// RAII handle for a spawned `mnem http serve` subprocess. `Drop` sends
 /// `kill` so a panicking test never leaks a server.
 struct HttpServer {
     child: Child,
@@ -60,8 +61,8 @@ struct HttpServer {
 }
 
 impl HttpServer {
-    /// Spawn `mnem-http` on a loopback ephemeral port, waiting until
-    /// `/v1/healthz` returns 200 (bounded by a ~5 s budget).
+    /// Spawn `mnem http serve` on a loopback ephemeral port, waiting
+    /// until `/v1/healthz` returns 200 (bounded by a ~5 s budget).
     ///
     /// `token` seeds `MNEM_HTTP_PUSH_TOKEN` on the child. Pass `None`
     /// to start a server with authentication administratively
@@ -74,8 +75,9 @@ impl HttpServer {
         drop(listener);
 
         let repo = TempDir::new().expect("repo tempdir");
-        let mut cmd = Command::cargo_bin("mnem-http").expect("built mnem-http");
-        cmd.arg("-R")
+        let mut cmd = Command::cargo_bin("mnem").expect("built mnem binary");
+        cmd.args(["http"])
+            .arg("-R")
             .arg(repo.path())
             .arg("--bind")
             .arg(format!("127.0.0.1:{port}"))
@@ -92,7 +94,7 @@ impl HttpServer {
         if let Some(t) = token {
             cmd.env(SERVER_TOKEN_ENV, t);
         }
-        let mut child = cmd.spawn().expect("spawn mnem-http");
+        let mut child = cmd.spawn().expect("spawn mnem http serve");
 
         let base_url = format!("http://127.0.0.1:{port}");
 
@@ -104,7 +106,7 @@ impl HttpServer {
         loop {
             if Instant::now() > deadline {
                 let _ = child.kill();
-                panic!("mnem-http did not come up on {base_url} within 5s: last={last_err:?}");
+                panic!("mnem http serve did not come up on {base_url} within 5s: last={last_err:?}");
             }
             match ureq::get(&healthz)
                 .timeout(Duration::from_millis(250))

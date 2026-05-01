@@ -214,7 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("# fresh = Retriever::execute() with no override (mnem-core");
     println!("#   naive path, forces a fresh index build each call).");
     println!("# warm  = Retriever::execute() with with_vector_index(Arc<..>)");
-    println!("#   override (mimics mnem-http warm IndexCache).");
+    println!("#   override (mimics mnem http warm IndexCache).");
     println!("# build%% = build / fresh ratio (how much of a fresh retrieve");
     println!("#   is pure index-build overhead).");
     println!();
@@ -235,7 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("#    interspersed pattern, that confirms the O(Q^2) hypothesis.");
     println!("#  - If warm_avg is flat in N, the search path itself is");
     println!("#    already acceptable; the O(N^2) behaviour lives in the");
-    println!("#    mnem-http cache-invalidation policy, not the algorithm.");
+    println!("#    mnem http cache-invalidation policy, not the algorithm.");
 
     Ok(())
 }

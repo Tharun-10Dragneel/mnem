@@ -41,7 +41,7 @@ for the full step-by-step.
 benchmarks/
   README.md                     # this file
   harness/                      # reproducer
-    Dockerfile                  # mnem-http build (FEATURES=onnx-bundled)
+    Dockerfile                  # mnem http build (FEATURES=onnx-bundled)
     compose.yml                 # 4 thread-pinned bench lanes
     run_bench.sh                # one-command driver
     adapters/                   # python adapters per benchmark

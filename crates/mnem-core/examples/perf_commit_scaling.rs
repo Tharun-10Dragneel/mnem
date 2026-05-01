@@ -4,7 +4,7 @@
 //! Before Fix X1: `Transaction::commit()` rebuilds every secondary
 //! index from scratch, so the cost grows linearly with the existing
 //! repo size. A 50-node commit at N=25k takes ~30 s in production
-//! (measured directly on a live mnem-http container).
+//! (measured directly on a live mnem http container).
 //!
 //! After Fix X1: the fast path in `index::incremental_append_indexes`
 //! only touches sub-trees that the new nodes actually modify. Cost

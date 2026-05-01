@@ -45,7 +45,8 @@ as native tools.
 ### 2. HTTP from any language
 
 ```bash
-mnem-http --bind 127.0.0.1:9876 --repo /path/to/graph
+mnem http serve                            # bind 127.0.0.1:9876 (default)
+mnem http serve --bind 0.0.0.0:9876      # expose (requires MNEM_HTTP_ALLOW_NON_LOOPBACK=1)
 ```
 
 Then POST to `/v1/retrieve` with `{"text": "...", "label": "user-42"}`.

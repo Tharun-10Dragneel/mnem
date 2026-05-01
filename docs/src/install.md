@@ -35,36 +35,24 @@ Replace `linux-x86_64` with `linux-aarch64` / `macos-x86_64` / `macos-aarch64` /
 
 ## Per-OS package managers
 
+After v0.2.0, mnem ships only via **Cargo** and **PyPI**. The Homebrew
+tap, AUR, Nix, winget, and scoop channels have been dropped in favour
+of a lean three-channel model (cargo / PyPI / npm). The Cargo channel
+supports `bundled-embedder`, `bundled-embedder-cuda`,
+`bundled-embedder-directml` feature flags.
+
 <details>
-<summary>macOS</summary>
+<summary>macOS / Linux / Windows</summary>
 
 ```bash
-brew install mnem      # tap added at 0.1.0+
-```
+# Cargo (any platform with Rust 1.95+)
+cargo install --locked mnem-cli --features bundled-embedder
 
-</details>
+# or via cargo-binstall (faster, downloads prebuilt)
+cargo binstall mnem-cli
 
-<details>
-<summary>Linux</summary>
-
-```bash
-# Arch
-yay -S mnem
-# Nix
-nix-env -iA nixpkgs.mnem
-# Cargo (works everywhere)
-cargo install --locked mnem-cli
-```
-
-</details>
-
-<details>
-<summary>Windows</summary>
-
-```powershell
-winget install mnem
-# or
-scoop install mnem
+# PyPI (Python users)
+pip install mnem-cli
 ```
 
 </details>
@@ -73,7 +61,7 @@ scoop install mnem
 <summary>Docker</summary>
 
 ```bash
-docker run --rm -p 9876:9876 ghcr.io/uranid/mnem-http:latest
+docker run --rm -p 9876:9876 ghcr.io/uranid/mnem:latest http serve
 ```
 
 </details>

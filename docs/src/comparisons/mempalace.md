@@ -35,7 +35,7 @@
 | 9 | Sparse lane | BM25 + SPLADE | hybrid-v4 keyword boost | MemPalace BENCHMARKS.md |
 | 10 | Graph lane | first-class (label / prop / adjacency) | KG with timeline + cross-wing tunnels | MemPalace MCP tools |
 | 11 | MCP surface | 11 tools | 29 tools | MemPalace README "MCP server" |
-| 12 | Plugin scaffolds | mnem-mcp + `mnem integrate` | `.claude-plugin/`, `.codex-plugin/` in repo | MemPalace repo |
+| 12 | Plugin scaffolds | mnem mcp + `mnem integrate` | `.claude-plugin/`, `.codex-plugin/` in repo | MemPalace repo |
 | 13 | Bindings | Rust + Python + TS + HTTP + CLI + MCP | Python + MCP | MemPalace README |
 | 14 | Hosted product | none | none | n/a |
 | 15 | Velocity | maturing 1.0 | 433 commits in first 12 days, 30 contributors (early 2026) | internal notes; verify on repo today |

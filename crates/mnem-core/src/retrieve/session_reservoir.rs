@@ -161,7 +161,7 @@ pub struct GcSweepReport {
 ///
 /// Backed by `BTreeMap` (rather than `DashMap`) to keep this
 /// helper dependency-free at the core-crate level. Server-side
-/// callers (`mnem-http`) wrap this in a `Mutex` / `RwLock` - the
+/// callers (`mnem http`) wrap this in a `Mutex` / `RwLock` - the
 /// Gap 01 spec R3 patch moves to DashMap when the sharded-lock
 /// primitive lands; until then a single lock suffices because
 /// observations are cheap (a `Vec::push` on a 128-slot ring).

@@ -40,7 +40,7 @@
 //!   blocks` / `push-blocks`.
 //!
 //! Everything in those three modules is pure data + pure functions.
-//! HTTP wiring lives in `mnem-http`; the CLI glue (`mnem remote add`
+//! HTTP wiring lives in `mnem http`; the CLI glue (`mnem remote add`
 //! etc.) lives in `mnem-cli`; neither lands until PR 3.
 //!
 //! ## Constraints

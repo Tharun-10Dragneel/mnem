@@ -37,7 +37,7 @@ docker compose -f benchmarks/harness/compose.yml up -d mnem-bench-1
 
 PYTHONUTF8=1 python benchmarks/harness/adapters/longmemeval_session.py \
     --dataset benchmarks/datasets/longmemeval/longmemeval_s_cleaned.json \
-    --mnem-http http://127.0.0.1:9876 \
+    --mnem http http://127.0.0.1:9876 \
     --limit 500 --top-k 10 \
     --out benchmarks/results/v0.1.0/longmemeval-500q.json
 

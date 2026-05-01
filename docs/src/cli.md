@@ -8,7 +8,7 @@
 mnem init [path]                     # create .mnem/ in path (default: cwd)
 mnem ingest <file|-> [--json] [...]  # add nodes from file or stdin
 mnem retrieve <text> [...]           # query (vector + sparse + graph)
-mnem serve [--bind addr]             # start HTTP server (alias of mnem-http)
+mnem serve [--bind addr]             # start HTTP server (alias of mnem http)
 mnem mcp install                     # wire as MCP server in your client
 mnem doctor                          # probe embedder + store + config
 ```

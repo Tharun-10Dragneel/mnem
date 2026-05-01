@@ -45,7 +45,7 @@ workspace = true
 # ollama|openai|onnx` (per-repo) or write `~/.mnem/config.toml`
 # (user-global). Either overrides the bundled fallback.
 [features]
-default = []
+default = ["bundled-embedder"]
 bundled-embedder = ["mnem-embed-providers/onnx-bundled"]
 # GPU execution-provider variants. Forward to the matching feature on
 # `mnem-embed-providers` so the CLI ships a self-contained binary that
@@ -86,6 +86,21 @@ mnem-ingest = { path = "../mnem-ingest", version = "=0.1.0", features = ["keyber
 # `--summarize` flag on `mnem retrieve`. Zero-impact without the
 # flag: the crate is only called when `args.summarize` is true.
 mnem-graphrag = { path = "../mnem-graphrag", version = "=0.1.0" }
+# After v0.2.0 merge: `mnem mcp serve` subcommand wraps the MCP server
+# library. Default features (`summarize`) bring in embed-providers +
+# graphrag so `mnem_community_summarize` works in the merged binary.
+mnem-mcp = { path = "../mnem-mcp", version = "=0.1.0", default-features = false, features = ["summarize"] }
+# After v0.2.0 merge: `mnem http serve` subcommand wraps the HTTP API
+# library. Brings in tokio + axum for the HTTP server runtime.
+mnem-http = { path = "../mnem-http", version = "=0.1.0" }
+# Direct re-export of axum (used by http::serve's `axum::serve`) since
+# the transitive dep from mnem-http is not re-exported to top-level.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path", "multipart"] }
+# `mnem http serve` needs a multi-thread runtime and the signal/shutdown
+# machinery. Upgrade from the existing `tokio` dep.
+# [tokio dep upgraded below]
+# `init_tracing()` in the http serve module uses tracing_subscriber.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 # v1.0 benchmark harness for `mnem bench`. The crate compiles standalone
 # (path-only dep, no version pin while v1.0 stabilises) and pulls its
 # own dialoguer + indicatif + ureq + sha2 surface; we link by path so
@@ -122,7 +137,7 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 # CLI blocks on a single round-trip, there is no parallel fan-out.
 # Feature set mirrors `mnem-transport`'s `client` feature so the
 # runtime boundaries line up.
-tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 # Progress bars for long-running ops: `mnem reindex` (per-node embed)
 # and `mnem ingest --recursive` (per-file walk). Detects non-TTY
 # automatically and degrades to no-op output on redirected stdout, so

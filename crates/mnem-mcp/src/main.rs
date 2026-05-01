@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
-//! `mnem-mcp` - Model Context Protocol server for mnem.
+//! `mnem mcp` - Model Context Protocol server for mnem.
 //!
 //! Speaks JSON-RPC 2.0 over stdio. Each line of stdin is one request;
 //! each response is one line of stdout. This is the wire format every
@@ -10,7 +10,7 @@
 //! Usage:
 //!
 //! ```bash
-//! mnem-mcp --repo ./my-mnem-repo
+//! mnem mcp --repo ./my-mnem-repo
 //! # or
 //! MNEM_REPO=./my-mnem-repo mnem-mcp
 //! # default when unset: ./.mnem in the current directory
@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
     // (or the legacy `MNEM_BENCH=0`).
     if !server.allow_labels {
         eprintln!(
-            "mnem-mcp: labels DISABLED (MNEM_LABELS=0 or MNEM_BENCH=0); \
+            "mnem mcp: labels DISABLED (MNEM_LABELS=0 or MNEM_BENCH=0); \
              caller-supplied `label`/`ntype` will be coerced to Node::DEFAULT_NTYPE."
         );
     }
@@ -84,7 +84,7 @@ fn parse_repo_path() -> PathBuf {
                 }
             }
             "--version" | "-V" => {
-                println!("mnem-mcp {}", env!("CARGO_PKG_VERSION"));
+                println!("mnem mcp {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--help" | "-h" => {
@@ -101,8 +101,8 @@ fn parse_repo_path() -> PathBuf {
 
 fn print_help() {
     eprintln!(
-        "mnem-mcp {}\nModel Context Protocol server for mnem\n\n\
-         USAGE:\n    mnem-mcp [--repo PATH]\n\n\
+        "mnem mcp {}\nModel Context Protocol server for mnem\n\n\
+         USAGE:\n    mnem mcp [--repo PATH]\n\n\
          Speaks JSON-RPC 2.0 over stdio. Intended to be launched by an\n\
          MCP client (Claude Desktop, Cursor, Windsurf, Claude Code, ...).\n\n\
          OPTIONS:\n    \

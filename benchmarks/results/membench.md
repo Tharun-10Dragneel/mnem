@@ -40,7 +40,7 @@ docker compose -f benchmarks/harness/compose.yml up -d mnem-bench-1
 # simple / roles
 PYTHONUTF8=1 python benchmarks/harness/adapters/membench.py \
     --data-dir benchmarks/datasets/membench/FirstAgent \
-    --mnem-http http://127.0.0.1:9876 \
+    --mnem http http://127.0.0.1:9876 \
     --category simple --topic roles \
     --limit 100 --top-k 5 \
     --out benchmarks/results/v0.1.0/membench-simple-roles.json
@@ -48,7 +48,7 @@ PYTHONUTF8=1 python benchmarks/harness/adapters/membench.py \
 # highlevel / movie
 PYTHONUTF8=1 python benchmarks/harness/adapters/membench.py \
     --data-dir benchmarks/datasets/membench/FirstAgent \
-    --mnem-http http://127.0.0.1:9876 \
+    --mnem http http://127.0.0.1:9876 \
     --category highlevel --topic movie \
     --limit 100 --top-k 5 \
     --out benchmarks/results/v0.1.0/membench-highlevel-movie.json

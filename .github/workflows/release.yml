@@ -125,7 +125,7 @@ jobs:
   # Build and upload release archives for every (triple) the install
   # scripts download. Archive name is `mnem-<triple>.tar.gz` (Unix) or
   # `mnem-<triple>.zip` (Windows); contents are bare binaries at the
-  # archive root: `mnem`, `mnem-mcp`, `mnem-http`.
+  # archive root: `mnem` (unified binary with mcp/http subcommands).
   binaries:
     name: binaries (${{ matrix.triple }})
     needs: release
@@ -204,53 +204,36 @@ jobs:
         shell: bash
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct HEAD)" >> "$GITHUB_ENV"
 
-      # Build mnem-cli + mnem-mcp with bundled-embedder so semantic retrieve
-      # works out of the box without an Ollama daemon. Then build mnem-http
-      # with the onnx features so the shipped server binary can dynamically
-      # load the bundled libonnxruntime alongside it (see ort load-dynamic
-      # config in mnem-embed-providers / mnem-sparse-providers /
-      # mnem-rerank-providers).
-      - name: Build release binaries (mnem-cli + mnem-mcp)
+      # Build the unified mnem binary with bundled-embedder. After the
+      # v0.2.0 merge, `mnem mcp serve` and `mnem http serve` are
+      # subcommands inside this single binary. The bundled-embedder
+      # forwards to mnem-embed-providers/onnx-bundled so dense
+      # retrieval works out of the box (no Ollama needed).
+      - name: Build release binary (mnem-cli)
         if: ${{ !matrix.use_cross }}
         env:
           RUSTFLAGS: "-C strip=debuginfo --remap-path-prefix=${{ github.workspace }}=."
         run: >
           cargo auditable build --release --locked
           --target ${{ matrix.triple }}
-          -p mnem-cli -p mnem-mcp --features bundled-embedder
+          -p mnem-cli --features bundled-embedder
 
-      - name: Build mnem-http (--features onnx)
-        if: ${{ !matrix.use_cross }}
-        env:
-          RUSTFLAGS: "-C strip=debuginfo --remap-path-prefix=${{ github.workspace }}=."
-        run: >
-          cargo auditable build --release --locked
-          --target ${{ matrix.triple }}
-          -p mnem-http --features embed-onnx,sparse-onnx,rerank-onnx
-
-      - name: Build release binaries (cross, mnem-cli + mnem-mcp)
+      - name: Build release binary (cross, mnem-cli)
         if: matrix.use_cross
         env:
           RUSTFLAGS: "-C strip=debuginfo --remap-path-prefix=${{ github.workspace }}=."
         run: >
           cross build --release --locked
           --target ${{ matrix.triple }}
-          -p mnem-cli -p mnem-mcp --features bundled-embedder
-
-      - name: Build mnem-http (cross, --features onnx)
-        if: matrix.use_cross
-        env:
-          RUSTFLAGS: "-C strip=debuginfo --remap-path-prefix=${{ github.workspace }}=."
-        run: >
-          cross build --release --locked
-          --target ${{ matrix.triple }}
-          -p mnem-http --features embed-onnx,sparse-onnx,rerank-onnx
+          -p mnem-cli --features bundled-embedder
 
       # Download platform-specific onnxruntime and stage the dynamic
       # library under `lib/` in the archive so users can run
       # `mnem-http` out of the box. ort's load-dynamic mode resolves the
-      # library via ORT_DYLIB_PATH or platform default search paths;
-      # the bundled README install snippet documents how to point it at
+      # `mnem http serve` (subcommand inside the unified mnem binary)
+      # out of the box. ort's load-dynamic mode resolves the library
+      # via ORT_DYLIB_PATH or platform default search paths; the
+      # bundled README install snippet documents how to point it at
       # the sibling lib/ directory.
       - name: Download onnxruntime (Unix)
         if: matrix.archive == 'tar.gz'
@@ -283,27 +266,39 @@ jobs:
           NAME="mnem-${{ matrix.triple }}"
           DIR="target/${{ matrix.triple }}/release"
           mkdir -p "dist/$NAME/bin" "dist/$NAME/lib"
-          cp "$DIR/mnem" "$DIR/mnem-mcp" "$DIR/mnem-http" "dist/$NAME/bin/"
-          # Bundle libonnxruntime so mnem-http (built with --features onnx)
-          # can resolve it via ort's load-dynamic mode at runtime.
+          # After v0.2.0: the unified `mnem` binary exposes `mcp serve`
+          # and `http serve` as subcommands. Ship only `mnem` in the
+          # prebuilt archive; users who need the HTTP server run
+          # `mnem http serve` with the same binary.
+          cp "$DIR/mnem" "dist/$NAME/bin/"
+          # Bundle libonnxruntime so `mnem http serve` (subcommand inside
+          # the unified binary) can resolve it via ort's load-dynamic
+          # mode at runtime.
           cp "ort-extract/lib/${{ matrix.ort_lib_glob }}" "dist/$NAME/lib/"
           # Drop README + LICENSE at archive root for discoverability.
           cp README.md LICENSE "dist/$NAME/" 2>/dev/null || cp README.md "dist/$NAME/"
-          # Install snippet pointing ORT_DYLIB_PATH at the bundled lib.
+          # Install snippet for the unified binary. `mnem http serve`
+          # is a subcommand inside the same binary; no separate archive.
           cat > "dist/$NAME/INSTALL.md" <<'EOF'
           # Install (prebuilt mnem)
 
-          Extract this archive, then point `ORT_DYLIB_PATH` at the
-          bundled onnxruntime so `mnem-http --features onnx` works:
+          Extract this archive, then run the CLI:
 
           ```bash
           tar xzf mnem-<version>-<triple>.tar.gz
           cd mnem-<triple>
-          export ORT_DYLIB_PATH="$(pwd)/lib/${{ matrix.ort_lib_glob }}"
-          ./bin/mnem-http
+          ./bin/mnem --version      # CLI
+          ./bin/mnem mcp serve     # MCP server (stdio)
+          ./bin/mnem http serve    # HTTP API server
           ```
 
-          The `mnem` and `mnem-mcp` binaries do not require onnxruntime.
+          For HTTP server use, point `ORT_DYLIB_PATH` at the bundled
+          onnxruntime:
+
+          ```bash
+          export ORT_DYLIB_PATH="$(pwd)/lib/${{ matrix.ort_lib_glob }}"
+          ./bin/mnem http serve
+          ```
           EOF
           tar czf "dist/$NAME.tar.gz" -C dist "$NAME"
           # SHA-256 alongside the archive so Homebrew / Scoop / the
@@ -323,27 +318,36 @@ jobs:
           $Dir  = "target/${{ matrix.triple }}/release"
           New-Item -ItemType Directory -Force -Path "dist/$Name/bin" | Out-Null
           New-Item -ItemType Directory -Force -Path "dist/$Name/lib" | Out-Null
-          foreach ($bin in @('mnem.exe', 'mnem-mcp.exe', 'mnem-http.exe')) {
+          foreach ($bin in @('mnem.exe')) {
               Copy-Item -Path "$Dir/$bin" -Destination "dist/$Name/bin/" -Force
           }
-          # Bundle onnxruntime.dll for mnem-http (--features onnx).
+          # Bundle onnxruntime.dll for `mnem http serve` (subcommand inside
+          # the unified mnem.exe; uses the onnx features via bundled-embedder).
           Copy-Item -Path "ort-extract/lib/${{ matrix.ort_lib_glob }}" -Destination "dist/$Name/lib/" -Force
           Copy-Item -Path "README.md" -Destination "dist/$Name/" -Force
           if (Test-Path "LICENSE") { Copy-Item -Path "LICENSE" -Destination "dist/$Name/" -Force }
+          # Install snippet for the unified binary. After the v0.2.0 merge,
+          # `mnem http serve` is a subcommand inside the same mnem.exe.
           $install = @"
           # Install (prebuilt mnem)
 
-          Extract the archive, then point ``ORT_DYLIB_PATH`` at the bundled
-          onnxruntime so ``mnem-http`` (built with ``--features onnx``) works:
+          Extract this archive, then run the CLI:
 
           ``````powershell
           Expand-Archive mnem-<version>-x86_64-pc-windows-msvc.zip
           cd mnem-x86_64-pc-windows-msvc
-          `$env:ORT_DYLIB_PATH = "`$PWD\lib\onnxruntime.dll"
-          .\bin\mnem-http.exe
+          .\bin\mnem.exe --version      # CLI
+          .\bin\mnem.exe mcp serve     # MCP server (stdio)
+          .\bin\mnem.exe http serve    # HTTP API server
           ``````
 
-          The ``mnem.exe`` and ``mnem-mcp.exe`` binaries do not require onnxruntime.
+          For HTTP server use, set ``ORT_DYLIB_PATH`` to the bundled
+          onnxruntime DLL:
+
+          ``````powershell
+          `$env:ORT_DYLIB_PATH = "`$PWD\lib\onnxruntime.dll"
+          .\bin\mnem.exe http serve
+          ``````
           "@
           Set-Content -Path "dist/$Name/INSTALL.md" -Value $install -Encoding utf8
           Compress-Archive -Path "dist/$Name/*" -DestinationPath "dist/$Name.zip" -Force
@@ -500,6 +504,12 @@ jobs:
           # Leaves (no internal deps) first; then libs that depend on them.
           # Topo-ordered: deps before dependents. cargo publish requires
           # each crate's deps to already be on crates.io.
+          # After v0.2.0: the publish list still includes mnem-mcp and
+          # mnem-http as library crates (they remain workspace members and
+          # are required by other crates), but the GitHub release archives
+          # ship only the unified `mnem` binary (which contains both as
+          # subcommands). Users who `cargo install mnem-mcp` or
+          # `cargo install mnem-http` still work as before.
           CRATES=(
             mnem-core
             mnem-ann
@@ -628,8 +638,9 @@ jobs:
   # Multi-arch Docker image published to both GitHub Container Registry
   # (always) and Docker Hub (when DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
   # secrets are set). Tags: `<version>`, `<major>.<minor>`, `latest`.
-  # Image is the mnem-http server with the `onnx` feature compiled in
-  # so the hybrid pipeline works out of the box inside the container.
+  # Image runs `mnem http serve` (subcommand inside the unified `mnem`
+  # binary) with bundled-embedder so the hybrid pipeline works out of
+  # the box inside the container.
   # -----------------------------------------------------------------
   publish-docker:
     name: publish Docker (GHCR + Docker Hub)

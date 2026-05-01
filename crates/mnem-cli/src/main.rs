@@ -17,7 +17,10 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod config;
 mod doctor;
+mod global;
+mod http;
 mod integrate;
+mod mcp;
 mod repo;
 mod wizard;
 
@@ -180,6 +183,14 @@ Examples:
 "
     )]
     CatFile(commands::cat_file::Args),
+    /// Manage the global repo registry (~/.mnemglobal/repos.toml).
+    /// Lists, sets the default, or prunes stale entries.
+    #[command(subcommand)]
+    Repos(commands::repos::ReposCmd),
+    /// Search all registered repos + the global graph, or write directly
+    /// to the global graph (~/.mnemglobal/.mnem/).
+    #[command(subcommand)]
+    Global(commands::global_cmd::GlobalCmd),
     /// Manage `[remote.<name>]` entries in `.mnem/config.toml`. Pure
     /// local config-file ops; no network in 0.3.
     #[command(
@@ -284,6 +295,30 @@ Examples:
   mnem bench results ./bench-out                      # re-render RESULTS.md
 ")]
     Bench(commands::bench::BenchArgs),
+    /// Model Context Protocol server commands. Use `mnem mcp serve` to
+    /// expose `mnem_retrieve`, `mnem_ingest`, `mnem_stats`, and 12 more
+    /// tools to any MCP-aware host (Claude Desktop, Cursor, Claude Code,
+    /// Continue, Zed, ...).
+    ///
+    /// ```bash
+    /// mnem mcp serve                  # auto-detect repo via walk-up
+    /// mnem mcp serve --repo ./my-repo # explicit repo path
+    /// ```
+    ///
+    /// Use `mnem integrate` to auto-wire this into Claude Desktop etc.;
+    /// or configure your client's `mcpServers` entry manually.
+    ///
+    /// ```bash
+    /// mnem mcp --repo ./my-repo   # MCP server over stdio
+    /// ```
+    Mcp(mcp::serve::ServeArgs),
+    /// Serve the HTTP JSON API. Binds to loopback by default; set
+    /// `--bind 0.0.0.0:9876` to expose (requires opt-in, see help).
+    ///
+    /// ```bash
+    /// mnem http --bind 127.0.0.1:9876 --repo .  # HTTP API server
+    /// ```
+    Http(http::serve::ServeArgs),
 }
 
 fn main() {
@@ -318,6 +353,8 @@ fn main() {
         Some(Cmd::Branch(sub)) => commands::branch::run(cli.repo.as_deref(), sub),
         Some(Cmd::Blame(args)) => commands::blame::run(cli.repo.as_deref(), args),
         Some(Cmd::CatFile(args)) => commands::cat_file::run(cli.repo.as_deref(), args),
+        Some(Cmd::Repos(sub)) => commands::repos::run(cli.repo.as_deref(), sub),
+        Some(Cmd::Global(sub)) => commands::global_cmd::run(cli.repo.as_deref(), sub),
         Some(Cmd::Remote(sub)) => commands::remote::run(cli.repo.as_deref(), sub),
         Some(Cmd::Clone(args)) => commands::clone::run(cli.repo.as_deref(), args),
         Some(Cmd::Fetch(a)) => commands::fetch::run(cli.repo.as_deref(), a),
@@ -331,6 +368,8 @@ fn main() {
         Some(Cmd::Doctor(args)) => doctor::run(cli.repo.as_deref(), args),
         Some(Cmd::Completions(args)) => commands::completions::run(args),
         Some(Cmd::Bench(args)) => commands::bench::run(args),
+        Some(Cmd::Mcp(args)) => mcp::serve::run(args),
+        Some(Cmd::Http(args)) => http::serve::run(args),
     };
     if let Err(e) = result {
         // audit-2026-04-25 R4 (Stage E re-fix): print the anyhow

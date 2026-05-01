@@ -174,7 +174,7 @@ impl Metrics {
         let http_requests = Family::<HttpRequestLabels, Counter>::default();
         registry.register(
             "mnem_http_requests_total",
-            "Total HTTP requests handled by mnem-http, bucketed by method, route, and status.",
+            "Total HTTP requests handled by mnem http, bucketed by method, route, and status.",
             http_requests.clone(),
         );
 

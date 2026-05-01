@@ -9,7 +9,7 @@
 //! `summary` field in the response (possibly empty when no embedder
 //! is configured on the test server, with a `summarize_skipped`
 //! reason string). This preserves the "never 500, always explain"
-//! posture of mnem-http.
+//! posture of mnem http.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

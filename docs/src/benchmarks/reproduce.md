@@ -23,7 +23,7 @@ Wall ETA: 30-50 min on a 16-core box. Output: `benchmarks/results/<UTC-stamp>/`.
 
 ## What happens
 
-1. Build `mnem-http` Docker image (release, `onnx-bundled` features).
+1. Build Docker image (release, FEATURES=onnx-bundled):
 2. Bring up 4 lanes with cpuset pinning + thread caps.
 3. Run 6 benches (LongMemEval, LoCoMo, ConvoMem, MemBench × 2, Hybrid v4)
    sequentially across the lanes via a token-bucket dispatcher.
@@ -36,7 +36,7 @@ docker compose -f benchmarks/harness/compose.yml up -d mnem-bench-1
 
 python benchmarks/harness/adapters/longmemeval_session.py \
     --dataset benchmarks/datasets/longmemeval/longmemeval_s_cleaned.json \
-    --mnem-http http://127.0.0.1:9876 \
+    mnem http serve --bind 127.0.0.1:9876 \
     --limit 500 --top-k 10 \
     --out benchmarks/results/longmemeval-500q.json
 

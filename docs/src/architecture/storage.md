@@ -22,7 +22,7 @@ Determinism is enforced via canonical sort + canonical encoding.
 | `in-memory` | bench harnesses, ephemeral agent sessions |
 
 Backend is chosen at startup via config or `--in-memory` flag on
-`mnem-http`. The two backends share the same object layer; switching
+`mnem http`. The two backends share the same object layer; switching
 does not change CIDs.
 
 ## Vector sidecar

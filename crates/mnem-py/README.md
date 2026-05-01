@@ -56,7 +56,7 @@ The v1 Python surface deliberately leaves out:
 - **Signing and verification.** Callers that need Ed25519 signatures build their signer in their own tooling; the Rust side remains the source of truth.
 - **CAS on refs, diff, merge.** These are powerful but rarely touched from Python; open an issue with a concrete use case if you need them.
 - **Structured Edge writes.** `add_edge` lands once the first Python caller asks for it.
-- **MCP server bindings.** The `mnem-mcp` binary is already Python-host-friendly (it speaks JSON-RPC 2.0 over stdio); no need to rewrap it.
+- **MCP server bindings.** The `mnem mcp` binary is already Python-host-friendly (it speaks JSON-RPC 2.0 over stdio); no need to rewrap it.
 
 ## Build from source
 

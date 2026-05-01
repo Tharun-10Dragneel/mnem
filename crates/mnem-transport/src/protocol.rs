@@ -234,7 +234,7 @@ where
 /// agree to use for the rest of the session.
 ///
 /// This type stays pure-data (no network, no HTTP) so both
-/// `mnem-http` and `mnem-transport::client` can consume it.
+/// `mnem http` and `mnem-transport::client` can consume it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CapabilitySet(BTreeSet<Capability>);
 

@@ -11,7 +11,7 @@ air-gap, or streamed through a pipe. It also freezes the
 that the HTTP remote protocol is built on, plus the `RemoteConfig`
 TOML shape and the `HaveSet`
 bloom-filter trait used by `fetch-blocks` / `push-blocks`. HTTP
-wiring lives in `mnem-http`; CLI glue lives in `mnem-cli`.
+wiring lives in `mnem http`; CLI glue lives in `mnem-cli`.
 
 ```rust
 use std::fs::File;

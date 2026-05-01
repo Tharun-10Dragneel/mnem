@@ -1,6 +1,4 @@
 //! Handler for the `mnem_resolve_or_create` MCP tool.
-//!
-//! Extracted from `tools.rs` in R3; body unchanged.
 
 use crate::server::Server;
 use anyhow::{Result, anyhow};
@@ -65,7 +63,7 @@ pub(in crate::tools) fn resolve_or_create(server: &mut Server, args: Value) -> R
         },
     };
     let value = json_to_ipld(&value_json)?;
-    // C3-10: default `agent_id` to "mnem-mcp" so the friendly
+    // C3-10: default `agent_id` to "mnem mcp" so the friendly
     // `{name, kind}` shape works end-to-end without forcing the
     // caller to thread an extra field. Mirrors the default in
     // `mnem_ingest`. Callers that pass an explicit `agent_id` keep
@@ -73,7 +71,7 @@ pub(in crate::tools) fn resolve_or_create(server: &mut Server, args: Value) -> R
     let agent_id = args
         .get("agent_id")
         .and_then(Value::as_str)
-        .unwrap_or("mnem-mcp")
+        .unwrap_or("mnem mcp")
         .to_string();
     let extra_props = args
         .get("extra_props")
@@ -81,18 +79,36 @@ pub(in crate::tools) fn resolve_or_create(server: &mut Server, args: Value) -> R
         .cloned()
         .unwrap_or_default();
 
+    // `global: true` -> resolve/create the same entity in
+    // ~/.mnemglobal/.mnem/ and stamp its UUID as `_global_anchor` on
+    // the local node. Best-effort: if the global graph is unreachable
+    // (not yet initialised, missing dir, store error), the local commit
+    // proceeds normally and a stderr note is emitted instead of failing.
+    let want_global = args
+        .get("global")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let global_anchor_uuid: Option<String> = if want_global {
+        try_stamp_global(&label, &prop_name, &value, &agent_id)
+    } else {
+        None
+    };
+
     let repo = server.load_repo()?;
     let mut tx = repo.start_transaction();
     let id = tx.resolve_or_create_node(&label, &prop_name, value.clone())?;
 
-    // If the node was just created and the caller provided extra props,
-    // overwrite with the richer version.
-    if !extra_props.is_empty() {
-        // `value` is owned here and not referenced after this block, so
-        // move it into `with_prop` directly instead of cloning again.
+    // Build the richer node when extra_props or _global_anchor need stamping.
+    let need_node_write = !extra_props.is_empty() || global_anchor_uuid.is_some();
+    if need_node_write {
         let mut node = Node::new(id, label.clone()).with_prop(prop_name.clone(), value);
         for (k, v) in &extra_props {
             node = node.with_prop(k.clone(), json_to_ipld(v)?);
+        }
+        if let Some(ref anchor) = global_anchor_uuid {
+            use ipld_core::ipld::Ipld;
+            node = node.with_prop("_global_anchor".to_string(), Ipld::String(anchor.clone()));
         }
         tx.add_node(&node)?;
     }
@@ -101,8 +117,57 @@ pub(in crate::tools) fn resolve_or_create(server: &mut Server, args: Value) -> R
 
     let mut out = String::new();
     out.push_str("mnem_resolve_or_create: ok\n");
-    out.push_str(&format!("  id:     {}\n", id.to_uuid_string()));
-    out.push_str(&format!("  label:  {label}\n"));
-    out.push_str(&format!("  op_id:  {}\n", new_repo.op_id()));
+    out.push_str(&format!("  id:            {}\n", id.to_uuid_string()));
+    out.push_str(&format!("  label:         {label}\n"));
+    if let Some(ref anchor) = global_anchor_uuid {
+        out.push_str(&format!("  _global_anchor: {anchor}\n"));
+    }
+    out.push_str(&format!("  op_id:         {}\n", new_repo.op_id()));
     Ok(out)
+}
+
+/// Resolve-or-create `(label, prop_name, value)` in the global graph at
+/// `~/.mnemglobal/.mnem/`. Returns the resulting node UUID as a string,
+/// or `None` with a stderr note if the global graph is absent or errors.
+fn try_stamp_global(
+    label: &str,
+    prop_name: &str,
+    value: &ipld_core::ipld::Ipld,
+    agent_id: &str,
+) -> Option<String> {
+    let global_data_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".mnemglobal")
+        .join(".mnem");
+
+    if !global_data_dir.is_dir() {
+        eprintln!(
+            "note: global graph not found at {}; skipping _global_anchor. \
+             Run `mnem integrate` to create it.",
+            global_data_dir.display()
+        );
+        return None;
+    }
+
+    let global_repo = match Server::open_repo_at(&global_data_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("note: could not open global graph: {e}; skipping _global_anchor");
+            return None;
+        }
+    };
+
+    let mut tx = global_repo.start_transaction();
+    let global_id = match tx.resolve_or_create_node(label, prop_name, value.clone()) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("note: global resolve_or_create failed: {e}; skipping _global_anchor");
+            return None;
+        }
+    };
+    if let Err(e) = tx.commit(agent_id, "mnem_mcp resolve_or_create (global anchor)") {
+        eprintln!("note: global commit failed: {e}; _global_anchor not stamped");
+        return None;
+    }
+    Some(global_id.to_uuid_string())
 }

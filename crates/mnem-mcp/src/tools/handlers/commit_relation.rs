@@ -70,7 +70,7 @@ pub(in crate::tools) fn commit_relation(server: &mut Server, args: Value) -> Res
     let agent_id = args
         .get("agent_id")
         .and_then(Value::as_str)
-        .unwrap_or("mnem-mcp")
+        .unwrap_or("mnem mcp")
         .to_string();
     let message = args
         .get("message")

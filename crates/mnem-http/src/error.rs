@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-/// HTTP error type for `mnem-http` handlers. Renders as JSON
+/// HTTP error type for `mnem http` handlers. Renders as JSON
 /// `{"schema": "mnem.v1.err", "error": "<message>"}` with an HTTP
 /// status code attached via `IntoResponse`.
 pub struct Error {

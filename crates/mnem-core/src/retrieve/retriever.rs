@@ -43,7 +43,7 @@ pub struct Retriever<'a> {
     vector_weight: f32,
     sparse_weight: f32,
     sparse_query: Option<crate::sparse::SparseEmbed>,
-    /// Pre-built vector index override. Lets callers (mnem-http,
+    /// Pre-built vector index override. Lets callers (mnem http,
     /// long-lived services) cache indexes keyed by commit CID and
     /// avoid the O(N) rebuild on every retrieve. Bound to a specific
     /// embed model via BruteForceVectorIndex's own model field.

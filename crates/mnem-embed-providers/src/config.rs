@@ -220,7 +220,7 @@ fn open_onnx(c: &OnnxConfig) -> Result<Box<dyn Embedder>, EmbedError> {
 fn open_onnx(_c: &OnnxConfig) -> Result<Box<dyn Embedder>, EmbedError> {
     Err(EmbedError::Config(
         "embed.provider = \"onnx\" but this binary was built without the `onnx` feature. \
-         Rebuild with `--features onnx` (or on mnem-http: `--features embed-onnx`) or \
+         Rebuild with `--features onnx` (or on mnem http: `--features embed-onnx`) or \
          switch the config to embed.provider = \"ollama\" / \"openai\"."
             .into(),
     ))

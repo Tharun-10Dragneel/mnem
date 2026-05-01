@@ -41,7 +41,7 @@ use pyo3::types::{PyAny, PyBool, PyDict};
 /// kwargs on `Repo.retrieve` / `Repo.query` are honoured.
 ///
 /// Gated behind the `MNEM_BENCH` environment variable, parity with
-/// `mnem-http`'s `AppState::allow_labels` and `mnem-mcp`'s
+/// `mnem http`'s `AppState::allow_labels` and `mnem mcp`'s
 /// `Server::allow_labels`. The gate is re-read on every access (not
 /// cached in a `OnceLock`) so Python tests that `os.environ[...] = ...`
 /// between calls see the new value without needing a subprocess. The
@@ -62,7 +62,7 @@ fn allow_labels() -> bool {
 /// Falsy strings (`"0"`, `"false"`, `"no"`, `"off"`, empty, all
 /// case-insensitive) are false. Anything else is true.
 ///
-/// Duplicated from `mnem-http`'s `AppState::parse_allow_labels` rather
+/// Duplicated from `mnem http`'s `AppState::parse_allow_labels` rather
 /// than depended upon: `mnem-py` has no reason to pull in the axum tree.
 fn parse_allow_labels(val: Option<&str>) -> bool {
     match val {
@@ -376,7 +376,7 @@ impl Repo {
         // `label` gated behind `MNEM_BENCH`. Off by default so casual
         // Python callers never stumble into label-scoped state; the
         // filter is silently dropped. Parity with POST /v1/retrieve in
-        // mnem-http and `mnem_retrieve` in mnem-mcp.
+        // mnem http and `mnem_retrieve` in mnem mcp.
         let gate = allow_labels();
         let label = if gate { label } else { None };
         // Clone out the current head view under the mutex (O(1) since
@@ -537,7 +537,7 @@ impl Transaction {
         // `ntype` gated behind `MNEM_BENCH`. Off by default: every
         // ingested node is coerced to `Node::DEFAULT_NTYPE` regardless
         // of what the caller passed. Parity with POST /v1/nodes in
-        // mnem-http and `mnem_commit` in mnem-mcp. Callers who want to
+        // mnem http and `mnem_commit` in mnem mcp. Callers who want to
         // keep caller-supplied `ntype` must launch the Python process
         // under `MNEM_BENCH=1` (or any truthy value).
         let ntype = if allow_labels() {
@@ -813,7 +813,7 @@ impl RetrievalIter {
 // `import _mnem` directly - nobody should; `_mnem` is private.
 #[pymodule]
 fn _mnem(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Parity with `mnem-http` / `mnem-mcp`: when `MNEM_BENCH` is set,
+    // Parity with `mnem http` / `mnem mcp`: when `MNEM_BENCH` is set,
     // caller-supplied `ntype` and `label` kwargs are honoured. Emit a
     // one-line stderr warning at module init so a Python user who
     // accidentally launched their process under a stray `MNEM_BENCH=1`

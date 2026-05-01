@@ -78,8 +78,8 @@ mnem integrate --all # non-interactive: wire all detected hosts
 
 Auto-detects and configures: **Claude Desktop**, **Claude Code**,
 **Cursor**, **Continue**, **Zed**. Any other MCP-aware host works via a
-hand-edited `mcpServers` entry pointing at the `mnem-mcp` stdio
-binary (see [`docs/src/mcp.md`](docs/src/mcp.md)).
+hand-edited `mcpServers` entry pointing at the `mnem mcp serve`
+subcommand of the unified `mnem` binary (see [`docs/src/mcp.md`](docs/src/mcp.md)).
 
 Restart your client. The agent gets `mnem_retrieve`, `mnem_ingest`,
 `mnem_traverse`, `mnem_stats`, `mnem_remove` (and 6 more) as native
@@ -101,7 +101,8 @@ tools. No extra daemon, no port to manage.
 | `mnem log` / `diff` / `branch` / `merge` | git-style history ops over the graph |
 | `mnem ref` / `cat-file` / `blame` | inspect refs and individual objects |
 | `mnem export` / `import` | CAR archives for ship-and-load |
-| `mnem-http --bind addr` | HTTP JSON API server (separate binary) |
+| `mnem mcp serve` | MCP JSON-RPC server over stdio (stdio transport) |
+| `mnem http serve` | HTTP JSON API server (loopback by default) |
 
 `mnem integrate` is the shortest path to a working agent: detects your
 environment, prompts for embedder + LLM choice, writes config,
@@ -124,9 +125,6 @@ Full reference: [`docs/src/cli.md`](docs/src/cli.md).
 ```bash
 # Recommended: Cargo with bundled embedder
 cargo install --locked mnem-cli --features bundled-embedder
-
-# Homebrew (0.1.0+)
-brew install mnem
 ```
 
 </details>
@@ -135,15 +133,11 @@ brew install mnem
 <summary><b>Linux</b></summary>
 
 ```bash
-# Any distro: Cargo with bundled embedder
+# Cargo with bundled embedder
 cargo install --locked mnem-cli --features bundled-embedder
 
 # CUDA-accelerated embedder (NVIDIA GPU)
 cargo install --locked mnem-cli --features bundled-embedder-cuda
-
-# Distro packages (v1.x)
-yay -S mnem                       # Arch (AUR)
-nix-env -iA nixpkgs.mnem          # Nixpkgs
 ```
 
 </details>
@@ -157,10 +151,6 @@ cargo install --locked mnem-cli --features bundled-embedder
 
 # DirectML-accelerated embedder (any GPU vendor on Windows)
 cargo install --locked mnem-cli --features bundled-embedder-directml
-
-# Package managers (v1.x)
-winget install mnem
-scoop install mnem
 ```
 
 </details>
@@ -183,11 +173,12 @@ PyPI build always includes it.
 <summary><b>Docker</b></summary>
 
 ```bash
-docker run --rm -p 9876:9876 ghcr.io/uranid/mnem-http:latest
+docker run --rm -p 9876:9876 ghcr.io/uranid/mnem:latest http serve
 ```
 
-The image is built with `FEATURES=onnx-bundled`; the bundled embedder
-is always present in Docker.
+The image is built with `FEATURES=onnx`; the bundled embedder
+is always present in Docker. Run `mnem mcp serve` inside the container
+for the MCP server surface.
 
 </details>
 
@@ -470,8 +461,8 @@ Full overview: [`docs/src/architecture/overview.md`](docs/src/architecture/overv
 |-------|------|
 | [`mnem-cli`](crates/mnem-cli) | `mnem` binary - one command for everything |
 | [`mnem-core`](crates/mnem-core) | graph model, retrieval, indexing, sidecars |
-| [`mnem-http`](crates/mnem-http) | HTTP JSON server |
-| [`mnem-mcp`](crates/mnem-mcp) | MCP server (stdio) |
+| [`mnem http`](crates/mnem http) | HTTP JSON server |
+| [`mnem mcp`](crates/mnem mcp) | MCP server (stdio) |
 | [`mnem-py`](crates/mnem-py) | PyO3 Python bindings |
 | [`mnem-embed-providers`](crates/mnem-embed-providers) | ONNX bundled, Ollama, OpenAI, Cohere |
 | [`mnem-sparse-providers`](crates/mnem-sparse-providers) | BM25, SPLADE-onnx |

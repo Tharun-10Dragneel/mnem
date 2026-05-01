@@ -1,6 +1,6 @@
 //! HTTP JSON API for mnem.
 //!
-//! Library half of the `mnem-http` binary. `app(repo_dir)` builds an
+//! Library half of the `mnem http` binary. `app(repo_dir)` builds an
 //! axum `Router` that wraps an open [`ReadonlyRepo`] on `repo_dir/.mnem`
 //! (auto-initialising if needed).
 //!
@@ -88,7 +88,7 @@ pub fn app(repo_dir: &Path) -> Result<Router> {
 }
 
 /// audit-2026-04-25 P2-7: enumerate every route the router mounts so
-/// the startup banner in `mnem-http` main is no longer hand-written
+/// the startup banner in `mnem http` main is no longer hand-written
 /// and incomplete. Each entry is `(METHOD-LIST, PATH, brief)`. Kept
 /// in sync with the `Router::new().route(...)` chain in
 /// `app_with_options` by colocating the data here; tests in
@@ -159,7 +159,7 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
         // stderr warning so an operator who flipped the flag by
         // accident sees it immediately.
         eprintln!(
-            "mnem-http: --in-memory ACTIVE. All commits are RAM-only and lost on process exit. This is intended for benchmarks and ephemeral sessions; NEVER use in a durable deployment."
+            "mnem http: --in-memory ACTIVE. All commits are RAM-only and lost on process exit. This is intended for benchmarks and ephemeral sessions; NEVER use in a durable deployment."
         );
         (
             std::sync::Arc::new(mnem_core::store::MemoryBlockstore::new()),
@@ -194,7 +194,7 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
         .unwrap_or_else(AppState::resolve_allow_labels_from_env);
     if allow_labels && opts.allow_labels.is_none() {
         eprintln!(
-            "mnem-http: MNEM_BENCH set; caller-supplied `label` fields will be honoured on ingest and retrieve."
+            "mnem http: MNEM_BENCH set; caller-supplied `label` fields will be honoured on ingest and retrieve."
         );
     }
 
@@ -204,11 +204,11 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
     let push_token = AppState::resolve_push_token_from_env();
     if push_token.is_some() {
         tracing::info!(
-            "mnem-http: MNEM_HTTP_PUSH_TOKEN configured; /remote/v1/push-blocks + /remote/v1/advance-head enabled."
+            "mnem http: MNEM_HTTP_PUSH_TOKEN configured; /remote/v1/push-blocks + /remote/v1/advance-head enabled."
         );
     } else {
         tracing::info!(
-            "mnem-http: MNEM_HTTP_PUSH_TOKEN not set; remote write verbs administratively disabled (503)."
+            "mnem http: MNEM_HTTP_PUSH_TOKEN not set; remote write verbs administratively disabled (503)."
         );
     }
 
@@ -226,7 +226,7 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
 
     // Permissive CORS for v1: the server binds to loopback by default
     // anyway, and browser clients need CORS to talk to us at all. Users
-    // exposing mnem-http to the network must front it with an auth proxy.
+    // exposing mnem http to the network must front it with an auth proxy.
     let cors = CorsLayer::new()
         .allow_methods(Any)
         .allow_headers(Any)

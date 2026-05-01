@@ -80,7 +80,7 @@ pub(crate) struct IngestJsonBody {
     pub overlap: Option<u32>,
     /// Commit author. Required.
     pub author: String,
-    /// Commit message. Optional; default `"mnem-http ingest"`.
+    /// Commit message. Optional; default `"mnem http ingest"`.
     #[serde(default)]
     pub message: Option<String>,
     /// Extractor selector. `"none"` (default) keeps the rule-based
@@ -208,7 +208,7 @@ async fn ingest_multipart(state: AppState, mut multipart: Multipart) -> Result<J
             max_tokens: max_tokens.unwrap_or(512),
             overlap: overlap.unwrap_or(32),
             author,
-            message: message.unwrap_or_else(|| "mnem-http ingest".into()),
+            message: message.unwrap_or_else(|| "mnem http ingest".into()),
             extractor,
         },
     )
@@ -252,7 +252,7 @@ async fn ingest_json(state: AppState, body: IngestJsonBody) -> Result<Json<Value
             max_tokens: body.max_tokens.unwrap_or(512),
             overlap: body.overlap.unwrap_or(32),
             author: body.author,
-            message: body.message.unwrap_or_else(|| "mnem-http ingest".into()),
+            message: body.message.unwrap_or_else(|| "mnem http ingest".into()),
             extractor: body.extractor,
         },
     )
@@ -289,7 +289,7 @@ fn run_ingest(
     }
     // Normalise whitespace-only message to the default.
     if params.message.trim().is_empty() {
-        params.message = "mnem-http ingest".into();
+        params.message = "mnem http ingest".into();
     }
 
     let chunker = resolve_chunker(&params.chunker, kind, params.max_tokens, params.overlap)?;

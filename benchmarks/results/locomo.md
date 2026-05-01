@@ -35,7 +35,7 @@ docker compose -f benchmarks/harness/compose.yml up -d mnem-bench-1
 
 PYTHONUTF8=1 python benchmarks/harness/adapters/locomo.py \
     --dataset benchmarks/datasets/locomo/locomo10.json \
-    --mnem-http http://127.0.0.1:9876 \
+    --mnem http http://127.0.0.1:9876 \
     --granularity session --top-k 10 \
     --out benchmarks/results/v0.1.0/locomo-session.json
 

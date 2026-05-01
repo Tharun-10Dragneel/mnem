@@ -1,4 +1,4 @@
-//! Print the MCP tool surface a `mnem-mcp` server advertises.
+//! Print the MCP tool surface a `mnem mcp` server advertises.
 //!
 //! Useful for integration builders who want to know, at build time,
 //! which tools their agent will see without starting a server and
@@ -16,7 +16,7 @@
 //! ```
 
 fn main() {
-    println!("mnem-mcp tool surface");
+    println!("mnem mcp tool surface");
     println!("  protocol version: {}", mnem_mcp::MCP_PROTOCOL_VERSION);
     println!();
 

@@ -2376,6 +2376,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "axum",
  "bytes",
  "clap",
  "clap_complete",
@@ -2388,8 +2389,10 @@ dependencies = [
  "mnem-core",
  "mnem-embed-providers",
  "mnem-graphrag",
+ "mnem-http",
  "mnem-ingest",
  "mnem-llm-providers",
+ "mnem-mcp",
  "mnem-rerank-providers",
  "mnem-transport",
  "serde",
@@ -2398,6 +2401,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "ureq 2.12.1",
 ]
 
@@ -2555,6 +2559,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "dirs",
  "ipld-core",
  "mnem-backend-redb",
  "mnem-core",

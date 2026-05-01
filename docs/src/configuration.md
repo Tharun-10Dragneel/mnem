@@ -32,7 +32,7 @@ vector_cap = 256
 | `MNEM_EMBED_API_KEY_ENV` | name of env var holding the API key |
 | `MNEM_ORT_INTRA_THREADS` | pin ONNX runtime thread count (bench harness) |
 | `MNEM_BENCH` | enable bench-only label scoping |
-| `MNEM_HTTP_ALLOW_NON_LOOPBACK` | allow `mnem-http` to bind 0.0.0.0 (Docker) |
+| `MNEM_HTTP_ALLOW_NON_LOOPBACK` | allow `mnem http` to bind 0.0.0.0 (Docker) |
 
 ## Provider switching
 

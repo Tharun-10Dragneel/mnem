@@ -132,7 +132,7 @@ fn initialize_reports_protocol_version() {
         mnem_mcp::MCP_PROTOCOL_VERSION,
         "handshake must expose the crate-level protocol version constant"
     );
-    assert_eq!(resp["result"]["serverInfo"]["name"], "mnem-mcp");
+    assert_eq!(resp["result"]["serverInfo"]["name"], "mnem mcp");
 }
 
 #[test]

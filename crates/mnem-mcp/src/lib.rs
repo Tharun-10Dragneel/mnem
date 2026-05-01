@@ -1,4 +1,4 @@
-//! Library half of the `mnem-mcp` binary.
+//! Library half of the `mnem mcp` binary.
 //!
 //! Exposes the JSON-RPC 2.0 dispatch used by the stdio entry point so
 //! downstream embedders (HTTP transports, Node/Python wrappers, test

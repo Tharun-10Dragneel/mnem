@@ -165,7 +165,7 @@ fn mnem_ingest_pdf_no_panic() {
 // ---------- CLI / HTTP subprocess smokes ----------
 //
 // These would spawn `target/debug/mnem ingest` and
-// `target/debug/mnem-http` respectively, POST a Markdown body, and
+// `target/debug/mnem http` respectively, POST a Markdown body, and
 // assert on the JSON response. They're marked `#[ignore]` so the
 // default `cargo test` pass stays hermetic; CI opts in via
 // `cargo test -- --ignored` once a dedicated job lands.

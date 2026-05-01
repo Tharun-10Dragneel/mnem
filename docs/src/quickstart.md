@@ -37,7 +37,7 @@ mnem retrieve "what is X" --label demo --top-k 5
 ## 5. Serve over HTTP (optional)
 
 ```bash
-mnem-http --bind 127.0.0.1:9876 --repo .
+mnem http serve --repo .        # bind 127.0.0.1:9876
 curl http://127.0.0.1:9876/v1/retrieve -d '{"text": "what does this do"}'
 ```
 

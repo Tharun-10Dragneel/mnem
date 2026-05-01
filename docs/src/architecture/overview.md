@@ -17,8 +17,8 @@ mnem is a Rust workspace of ~15 crates plus optional Python bindings.
 | `mnem-graphrag` | community summarisation, centroid+MMR |
 | `mnem-ann` | HNSW wrapper |
 | `mnem-cli` | `mnem` binary |
-| `mnem-http` | HTTP JSON server |
-| `mnem-mcp` | MCP server |
+| `mnem http` | HTTP JSON server |
+| `mnem mcp` | MCP server |
 | `mnem-py` | PyO3 bindings |
 
 ## Data flow

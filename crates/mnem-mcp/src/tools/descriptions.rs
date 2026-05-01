@@ -70,7 +70,7 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
     // entity-type) terms; the canonical (label, prop_name, value)
     // shape stays available for callers that anchor on a different
     // property (e.g. `email`, `slug`). `agent_id` defaults to
-    // "mnem-mcp" so the alias path is callable end-to-end without
+    // "mnem mcp" so the alias path is callable end-to-end without
     // extra fields.
     let resolve_or_create_schema = json!({
         "type": "object",
@@ -80,14 +80,11 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
             "prop_name": { "type": "string", "description": "Property to anchor the find-or-create on. Defaults to `name` when the `name` alias is used." },
             "name":      { "type": "string", "description": "Alias for the natural-language entity name. When set, `prop_name` defaults to \"name\" and `value` defaults to this string." },
             "value":     { "description": "String, number, bool, or JSON object/array. Canonicalised before indexing." },
-            "agent_id":  { "type": "string", "description": "Commit author. Defaults to 'mnem-mcp' when absent." },
+            "agent_id":  { "type": "string", "description": "Commit author. Defaults to 'mnem mcp' when absent." },
             "task_id":   { "type": "string" },
-            "extra_props": { "type": "object", "description": "Additional properties to set if the node has to be created." }
+            "extra_props": { "type": "object", "description": "Additional properties to set if the node has to be created." },
+            "global": { "type": "boolean", "description": "When true, also resolve-or-create the same entity in the global graph (~/.mnemglobal/.mnem/) and stamp its UUID as `_global_anchor` on the local node. Best-effort: silently skipped if the global graph has not been initialised." }
         },
-        "anyOf": [
-            { "required": ["prop_name", "value"] },
-            { "required": ["name"] }
-        ],
         "additionalProperties": false
     });
 
@@ -243,7 +240,7 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
                     "subject_props":{ "type": "object", "description": "Optional extra props to set on the subject node." },
                     "object_props": { "type": "object", "description": "Optional extra props to set on the object node." },
                     "edge_props":   { "type": "object", "description": "Optional props to set on the edge." },
-                    "agent_id":     { "type": "string", "description": "Commit author. Defaults to 'mnem-mcp' when absent." },
+                    "agent_id":     { "type": "string", "description": "Commit author. Defaults to 'mnem mcp' when absent." },
                     "message":      { "type": "string", "default": "mnem_mcp commit_relation" }
                 },
                 "required": ["subject", "predicate", "object"],
@@ -380,13 +377,79 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
                     "chunker":    { "type": "string", "enum": ["auto", "paragraph", "recursive", "session"], "default": "auto" },
                     "max_tokens": { "type": "integer", "minimum": 1, "maximum": 8192, "default": 512 },
                     "overlap":    { "type": "integer", "minimum": 0, "maximum": 8192, "default": 32 },
-                    "agent_id":   { "type": "string", "description": "Commit author. Defaults to 'mnem-mcp' when absent." },
+                    "agent_id":   { "type": "string", "description": "Commit author. Defaults to 'mnem mcp' when absent." },
                     "message":    { "type": "string", "default": "mnem_mcp ingest" }
                 },
-                "anyOf": [
-                    { "required": ["path"] },
-                    { "required": ["text"] }
-                ],
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "mnem_global_retrieve",
+            description: "Cross-repo semantic search. Searches every repo registered in \
+                          ~/.mnemglobal/repos.toml plus the global anchor graph itself \
+                          (~/.mnemglobal/.mnem/), deduplicates results by node UUID, and \
+                          returns them ranked by score with a [source] label. \
+                          Use this instead of mnem_retrieve when you want to recall facts \
+                          across all repos simultaneously - the preferred tool for reading \
+                          memory on every user turn.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "text":         { "type": "string", "description": "Query text. Passed as BM25/rerank input and optionally auto-embedded when an embedder is configured." },
+                    "vector":       {
+                        "type": "object",
+                        "description": "Pre-computed query vector. Reused across all repos - compute once, pass here.",
+                        "properties": {
+                            "model":  { "type": "string" },
+                            "values": { "type": "array", "items": { "type": "number" } }
+                        },
+                        "required": ["model", "values"],
+                        "additionalProperties": false
+                    },
+                    "limit":        { "type": "integer", "minimum": 1, "maximum": 1000, "default": 10, "description": "Max results per repo before dedup + merge sort." },
+                    "token_budget": { "type": "integer", "minimum": 1, "description": "Soft token cap on total rendered output." }
+                },
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "mnem_global_add",
+            description: "Write nodes and/or edges directly to the global graph \
+                          (~/.mnemglobal/.mnem/). Use this when an entity or fact should \
+                          belong to the shared cross-repo graph rather than (or in addition \
+                          to) the current local repo. Typical use: named entities \
+                          (people, orgs, places) that appear across multiple projects.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "nodes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ntype":   { "type": "string", "description": "Node label (e.g. 'Entity:Person'). Defaults to Node::DEFAULT_NTYPE." },
+                                "summary": { "type": "string", "description": "Human-readable summary sentence." },
+                                "props":   { "type": "object", "description": "Arbitrary key/value props." }
+                            },
+                            "additionalProperties": false
+                        }
+                    },
+                    "edges": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "src":       { "type": "string", "description": "Source node UUID." },
+                                "predicate": { "type": "string", "description": "Edge label (e.g. 'works_at')." },
+                                "dst":       { "type": "string", "description": "Destination node UUID." }
+                            },
+                            "required": ["src", "predicate", "dst"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "agent_id": { "type": "string", "description": "Commit author. Defaults to 'mnem mcp' when absent." },
+                    "message":  { "type": "string", "default": "mnem_mcp global_add" }
+                },
                 "additionalProperties": false
             }),
         },

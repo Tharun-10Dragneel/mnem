@@ -3,7 +3,7 @@
 //!
 //! audit-2026-04-25 R1 (Stage E re-fix): regression test added after a
 //! P2-7 banner refactor accidentally gated /metrics off on loopback
-//! binds, breaking pre-P2-7 always-on contract. The mnem-http binary
+//! binds, breaking pre-P2-7 always-on contract. The mnem http binary
 //! now defaults `metrics_enabled = true`; this suite locks that in.
 
 use axum::body::Body;

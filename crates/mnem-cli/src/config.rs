@@ -281,7 +281,7 @@ pub(crate) fn set_dotted(cfg: &mut Config, key: &str, value: Option<String>) -> 
         anyhow::bail!(
             "API keys must not be stored in config.toml. Set an env var, \
              then point mnem at it: `mnem config set embed.api_key_env OPENAI_API_KEY`.\n\
-             hint: see docs/RUNBOOK.md#1-mnem-http-returns-500s for the embed-provider \
+             hint: see docs/RUNBOOK.md#1-mnem http-returns-500s for the embed-provider \
              remediation checklist when keys are wrong or unreachable."
         );
     }
@@ -695,7 +695,7 @@ pub(crate) const BUNDLED_EMBEDDER_DEFAULT_MODEL: &str = "all-MiniLM-L6-v2";
 ///      semantic retrieve with zero post-install steps and no
 ///      Ollama daemon. When the feature is NOT compiled in, this
 ///      tier is skipped and the function returns `None` - the
-///      existing graceful empty-success path in mnem-mcp + mnem-http
+///      existing graceful empty-success path in mnem mcp + mnem-http
 ///      handles the no-embedder case unchanged.
 ///
 /// Returns `None` if none of the four yields a provider. Tier 3
@@ -1031,7 +1031,7 @@ mod tests {
     #[cfg(not(feature = "bundled-embedder"))]
     fn bundled_embedder_default_returns_none_when_feature_off() {
         // Without the feature, the auto-default path is gone; existing
-        // graceful empty paths in mnem-mcp / mnem-http handle the no-
+        // graceful empty paths in mnem-mcp / mnem http handle the no-
         // embedder case unchanged.
         assert!(bundled_embedder_default().is_none());
     }

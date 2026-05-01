@@ -1,8 +1,8 @@
-# mnem-mcp
+# mnem mcp
 
 Model Context Protocol server for mnem - the AI-native, local-first memory substrate for agents.
 
-Ships the `mnem-mcp` binary, which speaks MCP JSON-RPC 2.0 over stdio. Any
+Ships the `mnem mcp` binary, which speaks MCP JSON-RPC 2.0 over stdio. Any
 MCP-aware host (Claude Desktop, Cursor, Windsurf, Claude Code, custom
 clients) can point at it and mnem's tools show up: `mnem_stats`,
 `mnem_schema`, `mnem_search`, `mnem_vector_search`, `mnem_retrieve`,
@@ -13,9 +13,9 @@ cost of its own calls; writes propagate `agent_id` and `task_id` into commit
 and operation metadata so provenance stays queryable.
 
 ```bash
-mnem-mcp --repo ./my-mnem-repo
+mnem mcp --repo ./my-mnem-repo
 # or
-MNEM_REPO=./my-mnem-repo mnem-mcp
+MNEM_REPO=./my-mnem-repo mnem mcp
 ```
 
 Workspace top: [`../../README.md`](../../README.md). MCP guide:

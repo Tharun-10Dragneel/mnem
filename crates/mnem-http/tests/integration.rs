@@ -1,4 +1,4 @@
-//! Integration tests for `mnem-http`.
+//! Integration tests for `mnem http`.
 //!
 //! Uses `tower::ServiceExt::oneshot` to drive the router without
 //! binding a TCP port. Every test runs against a fresh temp-dir repo.

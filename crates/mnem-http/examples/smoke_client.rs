@@ -1,4 +1,4 @@
-//! End-to-end smoke-test of the `mnem-http` router.
+//! End-to-end smoke-test of the `mnem http` router.
 //!
 //! Spawns the server on an ephemeral loopback port inside the example's
 //! own tokio runtime, then fires three requests at it over a plain TCP

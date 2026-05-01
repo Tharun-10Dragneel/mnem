@@ -1,8 +1,8 @@
 //! Canonical `serde_json::Value` -> [`Ipld`] conversion for untrusted input.
 //!
 //! Three surfaces feed untrusted JSON into mnem: the CLI (`mnem ...
-//! --prop key=value`), `mnem-http` (request bodies on `/v1/*`), and
-//! `mnem-mcp` (tool-call `arguments` objects). Before `json_to_ipld`
+//! --prop key=value`), `mnem http` (request bodies on `/v1/*`), and
+//! `mnem mcp` (tool-call `arguments` objects). Before `json_to_ipld`
 //! lived here, each of those crates carried its own near-identical
 //! implementation, each with its own copy of [`IPLD_MAX_DEPTH`], its
 //! own `u64 > i64::MAX` rejection path, and its own error type
@@ -17,9 +17,9 @@
 //!
 //! - `mnem-cli`: `?` through `anyhow::Error` (the library `Display`
 //!   impl threads directly).
-//! - `mnem-http`: `map_err` to `mnem_http::error::Error::BadRequest` so
+//! - `mnem http`: `map_err` to `mnem_http::error::Error::BadRequest` so
 //!   a malformed JSON body returns HTTP 400 with a specific reason.
-//! - `mnem-mcp`: `map_err` to an MCP `error.invalid_params` response
+//! - `mnem mcp`: `map_err` to an MCP `error.invalid_params` response
 //!   carrying the same `Display` string as a structured field.
 //!
 //! ## Hardening

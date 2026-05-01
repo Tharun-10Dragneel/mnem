@@ -103,5 +103,28 @@ pub(crate) fn run(_override: Option<&Path>, args: Args) -> Result<()> {
 
     println!("initialised mnem repo in {}", data_dir.display());
     println!(" root op: {}", r.op_id());
+
+    // Best-effort: register this repo in ~/.mnemglobal/repos.toml so
+    // `mnem` without -R can discover it. Silent if ~/.mnemglobal doesn't
+    // exist yet (user hasn't run `mnem integrate`).
+    crate::global::register_repo(&target);
+
+    Ok(())
+}
+
+/// Create and initialise `.mnem/` inside `parent` without printing to stdout.
+/// Idempotent: returns Ok(()) if the repo already exists.
+/// Used by `mnem init` (via `run`) and `global::bootstrap` (for ~/.mnemglobal).
+pub(crate) fn init_mnem_dir(parent: &Path) -> Result<()> {
+    let data_dir = parent.join(repo::MNEM_DIR);
+    if data_dir.exists() {
+        return Ok(());
+    }
+    let (bs, ohs) = repo::create_or_open_stores(&data_dir)?;
+    let _r = ReadonlyRepo::init(bs, ohs)?;
+    let cfg_path = config::path_of(&data_dir);
+    if !cfg_path.exists() {
+        let _ = std::fs::write(&cfg_path, DEFAULT_CONFIG_TOML);
+    }
     Ok(())
 }

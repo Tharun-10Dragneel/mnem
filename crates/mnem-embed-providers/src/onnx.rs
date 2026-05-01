@@ -354,7 +354,7 @@ impl OnnxSession {
         // Intra-op thread default depends on which mode this binary
         // ships in:
         //
-        // - `onnx` (load-dynamic, mnem-http server build):
+        // - `onnx` (load-dynamic, mnem http server build):
         // default = 1. mnem keys its vector index on the raw
         // `Embedding` bytes; ORT reductions are NOT deterministic
         // across thread counts (f32 is non-associative under
