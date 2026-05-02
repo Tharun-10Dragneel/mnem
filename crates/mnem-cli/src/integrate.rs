@@ -2431,7 +2431,7 @@ fn setup_global(interactive: bool) -> Result<()> {
         );
     }
 
-    // Step 3: ask which repo should be the default for `mnem` without -R.
+    // Step 3: pin a default knowledge graph for bare `mnem` commands (no -R).
     let mut reg = crate::global::RepoRegistry::load(&global_dir)?;
 
     // Skip the prompt if a default is already pinned and we're not interactive.
@@ -2442,23 +2442,36 @@ fn setup_global(interactive: bool) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| global_dir.clone());
     let mut choices: Vec<(String, PathBuf)> = vec![(
         format!(
-            "{}  (the global graph itself, good for personal notes)",
+            "{}  (global graph - accessible from every project and session)",
             global_dir.display()
         ),
         global_dir.clone(),
     )];
     if cwd != global_dir {
-        choices.push((format!("{}  (current directory)", cwd.display()), cwd));
+        choices.push((
+            format!(
+                "{}  (this project - pinned as fallback for bare mnem commands)",
+                cwd.display()
+            ),
+            cwd,
+        ));
     }
 
     let default_repo = if interactive {
+        println!("\nDefault knowledge graph for agent queries");
+        println!("─────────────────────────────────────────");
+        println!("The agent hook queries your project .mnem/ first (walking up from");
+        println!("your current directory), then falls back to the global graph");
+        println!("automatically. The hook and system prompt behave the same either way.");
+        println!("This setting controls which graph bare `mnem` commands fall back to");
+        println!("when no project .mnem/ is found. Override any command with -R <path>.\n");
         let items: Vec<&str> = choices.iter().map(|(s, _)| s.as_str()).collect();
         let idx = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Default repo for `mnem` without -R")
+            .with_prompt("Default knowledge graph")
             .items(&items)
             .default(0)
             .interact()
-            .context("default repo prompt failed")?;
+            .context("default knowledge graph prompt failed")?;
         choices.remove(idx).1
     } else {
         global_dir.clone()
@@ -2473,7 +2486,7 @@ fn setup_global(interactive: bool) -> Result<()> {
     })?;
 
     if interactive || fresh {
-        println!("  ok default repo  {}", default_repo.display());
+        println!("  ok default graph  {}", default_repo.display());
     }
 
     Ok(())

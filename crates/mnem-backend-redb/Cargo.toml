@@ -21,8 +21,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
-mnem-core = { path = "../mnem-core", version = "=0.1.0" }
-mnem-ann  = { path = "../mnem-ann",  version = "=0.1.0", default-features = false }
+mnem-core = { path = "../mnem-core", version = "=0.1.1" }
+mnem-ann  = { path = "../mnem-ann",  version = "=0.1.1", default-features = false }
 bytes     = { workspace = true }
 redb      = { workspace = true }
 

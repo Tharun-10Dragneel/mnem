@@ -173,13 +173,25 @@ Five minutes from zero. See [`docs/src/quickstart.md`](docs/src/quickstart.md) f
 One command wires the **MCP server entry**, the **UserPromptSubmit hook** (for hosts that support it), and the **mnem system prompt** into the host's project-rules file. Restart the host and the agent starts using mnem automatically.
 
 ```bash
-mnem integrate                  # interactive: detect installed hosts and prompt
-mnem integrate claude-code      # wire a specific host directly
-mnem integrate --all            # wire every detected host without prompting
+mnem integrate                           # interactive: detect installed hosts and prompt
+mnem integrate claude-code               # wire a specific host, skip interactive detection
+mnem integrate --all                     # wire every detected host without prompting
+
+mnem integrate --check                   # report wired state for all hosts; nothing changes
+mnem integrate --dry-run                 # preview what would be written without changing anything
+mnem integrate --show claude-code        # print the MCP JSON block for manual copy-paste
+
+mnem integrate --no-hooks                # skip UserPromptSubmit hook wiring
+mnem integrate --no-system-prompt        # skip system prompt wiring
+mnem integrate --target-repo ~/notes     # point the MCP server at a specific graph, not the global one
 ```
 
-> [!TIP]
-> Run `mnem integrate --help` for all options including `--dry-run`, `--no-hooks`, `--no-system-prompt`, `--check`, and `--show <host>`.
+**What gets wired:**
+- **MCP server** (`mcpServers.mnem`) - the agent gets full mnem tool access via `mnem mcp --repo <graph>`; defaults to the global graph (`~/.mnemglobal/.mnem`)
+- **UserPromptSubmit hook** (Claude Code only) - runs `mnem retrieve` before each message, auto-injecting relevant memory into context
+- **System prompt** - mnem usage instructions injected into the host's project-rules file
+
+The hook always queries your project's `.mnem/` first (walking up from the current directory), then falls back to `mnem global retrieve` automatically. The hook and system prompt behave the same regardless of which default knowledge graph you choose during setup. Use `--target-repo` only if you want the MCP server to point somewhere other than the global graph.
 
 Auto-detects and configures:
 - Claude Code
@@ -226,8 +238,11 @@ mnem add edge --from <uuid> --to <uuid> --label works_at            # connect tw
 ### Retrieving knowledge
 
 ```bash
-mnem retrieve "what did we decide about the API design"
+mnem retrieve "what did we decide about the API design"  # searches local .mnem/ first, falls back to global
+mnem -R ~/notes retrieve "query"                         # target a specific graph explicitly
 ```
+
+`-R <path>` is a global flag that redirects any command to a specific repository directory. It overrides the walk-up search from the current directory and any default set via `mnem integrate`. Applies to all subcommands: `mnem -R ~/notes status`, `mnem -R ~/notes log`, etc.
 
 Hybrid retrieval: vector (HNSW) + sparse (BM25/SPLADE) + graph traversal, fused via RRF. See [GraphRAG](#graphrag) for tuning flags.
 
