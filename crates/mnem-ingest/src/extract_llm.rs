@@ -27,17 +27,22 @@
 //!
 //! # Confidence scoring
 //!
-//! LLM entities are stamped with `confidence = 0.75` - below the regex
-//! extractors (`1.00`) but above capitalized-phrase heuristics
-//! (`0.60`). LLM relations ride at `0.65`. Operators who want to weight
-//! the pipeline by confidence can use these deterministic bands.
+//! LLM entities are stamped with `confidence = 0.75`. LLM relations
+//! ride at `0.65`. Operators who want to weight the pipeline by confidence
+//! can use these deterministic bands.
+//!
+//! # Label pass-through
+//!
+//! The `kind` field from the LLM response is used verbatim (after trimming
+//! and empty-string rejection). There is no normalization or remapping — the
+//! LLM's own label string goes straight to the graph as the entity ntype.
 //!
 //! # Failure policy
 //!
 //! Any HTTP failure, timeout, or schema-invalid response resolves to an
 //! empty `Vec` plus a `tracing::warn!`. The extractor never panics and
 //! never surfaces a transport error to the caller: the ingest pipeline
-//! degrades gracefully to whatever regex/keyword signal was found.
+//! degrades gracefully to whatever NER signal was found.
 //!
 //! Heavy deps (`reqwest`) are feature-gated; the default build stays
 //! dep-clean.
@@ -48,7 +53,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::extract::{EntityKind, EntitySpan, Extractor, RelationSpan};
+use crate::extract::{EntitySpan, Extractor, RelationSpan};
 use crate::types::Section;
 
 /// Default Ollama endpoint; matches the out-of-box `ollama serve` bind.
@@ -161,7 +166,8 @@ impl OllamaExtractor {
             "Extract entities and relations from the following text. \
              Return STRICTLY JSON matching the schema. \
              Entity 'start' and 'end' are byte offsets into the text. \
-             Entity 'kind' is one of: person, organization, location, date, url, email, keyword. \
+             Entity 'kind' is a descriptive label for the entity type (any label is valid, \
+             e.g. person, organization, location, product, event, chemical, concept). \
              Relation 'kind' is one of: co_occurs_with, acts_on. \
              Relation 'subj' and 'obj' are indices into the entities array.\n\n\
              TEXT:\n{section_text}"
@@ -287,7 +293,10 @@ fn verify_entity(e: LlmEntity, section_text: &str) -> Option<EntitySpan> {
     if slice != e.text {
         return None;
     }
-    let kind = parse_entity_kind(&e.kind)?;
+    let kind = e.kind.trim().to_string();
+    if kind.is_empty() {
+        return None;
+    }
     Some(EntitySpan {
         kind,
         text: e.text,
@@ -297,19 +306,6 @@ fn verify_entity(e: LlmEntity, section_text: &str) -> Option<EntitySpan> {
         },
         confidence: LLM_ENTITY_CONFIDENCE,
     })
-}
-
-fn parse_entity_kind(s: &str) -> Option<EntityKind> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "person" => Some(EntityKind::Person),
-        "organization" | "org" => Some(EntityKind::Organization),
-        "location" | "place" => Some(EntityKind::Location),
-        "date" => Some(EntityKind::Date),
-        "url" => Some(EntityKind::Url),
-        "email" => Some(EntityKind::Email),
-        "keyword" => Some(EntityKind::Keyword),
-        _ => None,
-    }
 }
 
 // ---------------- Tests ----------------

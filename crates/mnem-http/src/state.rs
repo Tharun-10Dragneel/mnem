@@ -284,6 +284,9 @@ pub struct AppState {
     /// `config.toml`. Wrapped in `Arc` for cheap clones across handler
     /// dispatch.
     pub traverse_cfg: Arc<crate::routes::traverse::TraverseAnswerCfg>,
+    /// NER provider config resolved from the repo's `config.toml` at
+    /// startup. When `None`, ingest paths default to `NerConfig::Rule`.
+    pub ner_cfg: Option<mnem_ingest::NerConfig>,
 }
 
 impl AppState {
@@ -933,6 +936,7 @@ pub(crate) mod test_support {
             push_token: token,
             graph_cache: Arc::new(Mutex::new(GraphCache::default())),
             traverse_cfg: Arc::new(crate::routes::traverse::TraverseAnswerCfg::default()),
+            ner_cfg: None,
         }
     }
 }

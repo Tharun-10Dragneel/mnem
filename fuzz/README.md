@@ -16,7 +16,7 @@ Three input surfaces handle untrusted bytes on every deployment:
   round-trip goes through this path.
 - **Ingest PDF parser** (`mnem_ingest::pdf::parse_pdf`): every
   `SourceKind::Pdf` ingest routes user-supplied bytes through
-  `pdf-extract`. Phase-B5b already wraps the call in `catch_unwind`;
+  `pdf-extract`. The parser call is wrapped in `catch_unwind`;
   the fuzz target regression-guards that contract.
 
 All three surfaces already have hand-written unit tests for their

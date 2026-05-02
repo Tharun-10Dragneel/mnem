@@ -57,6 +57,7 @@ fn mnem_ingest_md_roundtrip() {
         ntype: "Doc".into(),
         max_tokens: 512,
         overlap: 32,
+        ner: mnem_ingest::NerConfig::default(),
     });
 
     // Snippet shaped like docs/SPEC.md: a heading plus two prose
@@ -109,6 +110,7 @@ fn mnem_ingest_conversation_smoke() {
         ntype: "Conversation".into(),
         max_tokens: 512,
         overlap: 0,
+        ner: mnem_ingest::NerConfig::default(),
     });
 
     let result = ing

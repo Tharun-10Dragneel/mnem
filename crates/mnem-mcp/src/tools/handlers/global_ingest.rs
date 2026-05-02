@@ -110,12 +110,14 @@ pub(in crate::tools) fn global_ingest(_server: &mut Server, args: Value) -> Resu
         }
     };
 
+    let ner = crate::tools::ner::resolve_ner_cfg(&global_data);
     let chunker = resolve_chunker(&chunker_str, kind, max_tokens, overlap)?;
     let config = IngestConfig {
         chunker,
         ntype,
         max_tokens,
         overlap,
+        ner,
     };
     let ing = Ingester::new(config);
 

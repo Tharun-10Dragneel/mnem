@@ -49,6 +49,10 @@ sidecar-unstructured = ["dep:which", "dep:tempfile"]
 # mnem-core is referenced via path + pinned version; matches the pattern
 # used by mnem-transport / mnem-http / mnem-cli (no workspace hoisting).
 mnem-core            = { path = "../mnem-core", version = "=0.1.0" }
+# NER provider trait + label constants + RuleNer/NullNer implementations.
+# Always present (zero-dep crate); the ner field on IngestConfig selects
+# which provider runs at pipeline construction time.
+mnem-ner-providers   = { path = "../mnem-ner-providers", version = "=0.1.0" }
 # Optional KeyBERT extractor adapter dep (E3). Off by default so the
 # default binary footprint is unchanged from Phase-B5c.
 mnem-extract         = { path = "../mnem-extract", version = "=0.1.0", optional = true }
@@ -75,11 +79,7 @@ unicode-segmentation = "1.12"
 pdf-extract          = "0.7"
 # Advanced PDF fallback (optional, feature-gated).
 pdfium-render        = { version = "0.8", optional = true }
-# Multi-pattern matcher used by the Session chunker boundary detector and
-# planned for heading-heuristic work in B5c.
-aho-corasick         = "1.1"
-# Rule-based NER regex set (URL / email / ISO-8601 / "Mon DD, YYYY"), Phase-B5c.
-# Not hoisted: matches the per-crate pattern used by other ingest deps above.
+# Verb-window regex for proximity-relation promotion (acts_on detection).
 regex                = "1.10"
 # Optional HTTP client for the Ollama extractor (Phase-B5e, feature `ollama`).
 # `blocking` keeps the ingest pipeline sync (— mnem-core and every

@@ -279,10 +279,11 @@ pub(crate) fn run(override_path: Option<&Path>, a: Args) -> Result<()> {
             ntype: a.ntype.clone(),
             max_tokens: a.max_tokens,
             overlap: a.overlap,
+            ner: config::resolve_ner(&cfg),
         };
         let mut ing = Ingester::new(config);
         if let Some(emb) = &keybert_embedder {
-            ing = ing.with_extractor(Box::new(mnem_ingest::KeyBertAdapter::new(emb.clone())));
+            ing = ing.with_extractor(Box::new(mnem_ingest::KeyBertAdapter::new(emb.clone(), "Keyword")));
         }
         if let Some(cb) = &progress_cb {
             ing = ing.with_progress(cb.clone());

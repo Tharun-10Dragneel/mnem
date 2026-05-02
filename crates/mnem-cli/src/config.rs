@@ -13,6 +13,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use mnem_embed_providers::{OllamaConfig, OnnxConfig, OpenAiConfig, ProviderConfig};
 use mnem_llm_providers::{OllamaLlmConfig, OpenAiLlmConfig, ProviderConfig as LlmProviderConfig};
+use mnem_ner_providers::NerConfig;
 use mnem_rerank_providers::{
     CohereConfig, JinaConfig, ProviderConfig as RerankProviderConfig, VoyageConfig,
 };
@@ -41,6 +42,11 @@ pub(crate) struct Config {
     /// multi-query retrieval. API keys live in env vars, never here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm: Option<LlmProviderConfig>,
+    /// Optional NER provider configuration. Defaults to rule-based
+    /// heuristic when absent. Set to `NerConfig::None` via
+    /// `[ner]\nprovider = "none"` to suppress entity extraction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ner: Option<NerConfig>,
     /// Persistent defaults for `mnem retrieve`. Every knob here is
     /// also exposed as a CLI flag; the flag wins when both are set.
     /// Git-shaped "set once, never pass again" pattern: e.g.
@@ -171,6 +177,7 @@ pub(crate) const KNOWN_KEYS: &[&str] = &[
     "rerank.model",
     "rerank.api_key_env",
     "rerank.base_url",
+    "ner.provider",
     "retrieve.limit",
     "retrieve.budget",
     "retrieve.vector_cap",
@@ -227,6 +234,10 @@ pub(crate) fn get_dotted(cfg: &Config, key: &str) -> Option<String> {
             RerankProviderConfig::Cohere(c) => c.base_url.clone(),
             RerankProviderConfig::Voyage(c) => c.base_url.clone(),
             RerankProviderConfig::Jina(c) => c.base_url.clone(),
+        }),
+        "ner.provider" => cfg.ner.as_ref().map(|n| match n {
+            NerConfig::Rule => "rule".into(),
+            NerConfig::None => "none".into(),
         }),
         "retrieve.limit" => cfg
             .retrieve
@@ -301,6 +312,12 @@ pub(crate) fn set_dotted(cfg: &mut Config, key: &str, value: Option<String>) -> 
         "rerank.model" => set_rerank_model(cfg, value.as_deref())?,
         "rerank.api_key_env" => set_rerank_api_key_env(cfg, value.as_deref())?,
         "rerank.base_url" => set_rerank_base_url(cfg, value.as_deref())?,
+
+        "ner.provider" => match value.as_deref() {
+            Some("rule") | None => cfg.ner = Some(NerConfig::Rule),
+            Some("none") => cfg.ner = Some(NerConfig::None),
+            Some(other) => anyhow::bail!("unknown ner.provider `{other}` (expected rule|none)"),
+        },
 
         "retrieve.limit" => set_retrieve_usize(cfg, value.as_deref(), |r, n| r.limit = n)?,
         "retrieve.budget" => set_retrieve_u32(cfg, value.as_deref(), |r, n| r.budget = n)?,
@@ -809,6 +826,30 @@ pub(crate) fn resolve_reranker(cfg: &Config) -> Option<RerankProviderConfig> {
         };
     }
     cfg.rerank.clone()
+}
+
+/// Resolve the effective NER config. Precedence:
+///   1. `MNEM_NER_PROVIDER` env var (`"rule"` or `"none"`).
+///   2. The `[ner]` section in the passed-in per-repo `Config`.
+///   3. The `[ner]` section in the user-global `~/.mnem/config.toml`.
+///   4. [`NerConfig::Rule`] (the always-available zero-dep default).
+///
+/// Returns a [`NerConfig`] — never `None`, because a sane default
+/// (`Rule`) is always available without any config.
+pub(crate) fn resolve_ner(cfg: &Config) -> NerConfig {
+    if let Ok(p) = std::env::var("MNEM_NER_PROVIDER") {
+        return match p.to_ascii_lowercase().as_str() {
+            "none" => NerConfig::None,
+            _ => NerConfig::Rule,
+        };
+    }
+    if let Some(n) = cfg.ner.clone() {
+        return n;
+    }
+    if let Some(n) = load_global().ok().and_then(|g| g.ner) {
+        return n;
+    }
+    NerConfig::Rule
 }
 
 /// Parse a `--rerank PROVIDER:MODEL` CLI argument into a

@@ -6,6 +6,7 @@
 use std::ops::Range;
 
 use mnem_core::id::Cid;
+use mnem_ner_providers::NerConfig;
 use serde::{Deserialize, Serialize};
 
 /// A hierarchical text region extracted from a source.
@@ -84,6 +85,11 @@ pub struct IngestConfig {
     pub max_tokens: u32,
     /// Overlap tokens between adjacent chunks (recursive chunker only).
     pub overlap: u32,
+    /// NER provider selection. Defaults to [`NerConfig::Rule`] (the
+    /// capitalized-phrase heuristic). Set to [`NerConfig::None`] to
+    /// suppress all entity extraction.
+    #[serde(default)]
+    pub ner: NerConfig,
 }
 
 impl Default for IngestConfig {
@@ -93,6 +99,7 @@ impl Default for IngestConfig {
             ntype: "Doc".into(),
             max_tokens: 512,
             overlap: 32,
+            ner: NerConfig::default(),
         }
     }
 }
@@ -157,41 +164,30 @@ pub struct Message {
     pub timestamp: Option<u64>,
 }
 
-/// Configuration for the rule-based entity + relation extractor.
+/// Configuration for the entity + relation extractor.
 ///
-/// Wired in Phase-B5c. Defaults emit every [`crate::extract::EntityKind`]
-/// variant, carry an empty keyword list, and use a 6-token relation
-/// window. Callers tighten the set when they only want, say, emails
-/// and URLs out of a source.
+/// Entity extraction is handled entirely by the NER provider wired via
+/// [`IngestConfig::ner`]. The provider may return any label strings it
+/// chooses; there is no fixed vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractorConfig {
-    /// Which entity kinds the extractor should emit. An empty
-    /// [`HashSet`](std::collections::HashSet) would suppress every
-    /// layer, so we store an ordered [`Vec`] of kinds and look up via
-    /// `contains` - correct even when the caller passes duplicates.
-    pub emit_kinds: Vec<crate::extract::EntityKind>,
-    /// Caller-supplied keyword list fed into the Aho-Corasick layer.
-    /// Case-insensitive, left-most-longest match semantics.
-    pub keywords: Vec<String>,
+    /// Call the NER provider for named-entity extraction. All labels
+    /// returned by the provider pass through unconditionally.
+    #[serde(default = "default_true")]
+    pub extract_ner: bool,
     /// Maximum number of whitespace-separated tokens between two entity
     /// spans that may still be linked by a proximity relation.
     pub relation_window_tokens: usize,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for ExtractorConfig {
     fn default() -> Self {
-        use crate::extract::EntityKind;
         Self {
-            emit_kinds: vec![
-                EntityKind::Person,
-                EntityKind::Organization,
-                EntityKind::Location,
-                EntityKind::Date,
-                EntityKind::Url,
-                EntityKind::Email,
-                EntityKind::Keyword,
-            ],
-            keywords: Vec::new(),
+            extract_ner: true,
             relation_window_tokens: 6,
         }
     }

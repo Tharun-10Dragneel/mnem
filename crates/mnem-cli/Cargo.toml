@@ -75,6 +75,7 @@ mnem-transport = { path = "../mnem-transport", version = "=0.1.0", features = ["
 mnem-embed-providers = { path = "../mnem-embed-providers", version = "=0.1.0", features = ["mock"] }
 mnem-rerank-providers = { path = "../mnem-rerank-providers", version = "=0.1.0" }
 mnem-llm-providers = { path = "../mnem-llm-providers", version = "=0.1.0" }
+mnem-ner-providers = { path = "../mnem-ner-providers", version = "=0.1.0" }
 # Ingest pipeline (Phase-B5c): parses Markdown / text / PDF / chat-JSON
 # sources into Doc + Chunk + Entity subgraphs. Wired here behind the
 # `mnem ingest` subcommand (Phase-B5d). The `keybert` feature (C3 FIX-3)

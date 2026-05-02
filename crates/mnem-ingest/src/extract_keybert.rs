@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use mnem_embed_providers::Embedder;
 use mnem_extract::{Extractor as StatisticalExtractor, KeyBertExtractor};
 
-use crate::extract::{EntityKind, EntitySpan, Extractor, RelationSpan};
+use crate::extract::{EntitySpan, Extractor, RelationSpan};
 use crate::types::Section;
 
 /// Predicate emitted for co-occurrence edges by the KeyBERT adapter.
@@ -57,6 +57,10 @@ pub struct KeyBertAdapter {
     ngram_range: (usize, usize),
     mmr_diversity: f32,
     pmi_threshold: f32,
+    /// ntype label stamped on every entity this adapter emits.
+    /// Callers set this via [`KeyBertAdapter::with_label`]; there is no
+    /// built-in default — the label vocabulary is entirely up to the caller.
+    label: String,
     /// Section-text → embedding cache. Populated by [`Extractor::prepare`]
     /// in one batched `Embedder::embed_batch` call per file; queried
     /// by [`Extractor::extract_entities`] on every (section, chunk)
@@ -78,25 +82,38 @@ impl std::fmt::Debug for KeyBertAdapter {
             .field("ngram_range", &self.ngram_range)
             .field("mmr_diversity", &self.mmr_diversity)
             .field("pmi_threshold", &self.pmi_threshold)
+            .field("label", &self.label)
             .field("section_cache_len", &cached)
             .finish()
     }
 }
 
 impl KeyBertAdapter {
-    /// Build an adapter around the supplied embedder with KeyBERT
-    /// defaults (`top_k = 10`, `ngram_range = (1, 3)`,
-    /// `mmr_diversity = 0.5`, `pmi_threshold = 1.0`).
+    /// Build an adapter around the supplied embedder with KeyBERT defaults
+    /// (`top_k = 10`, `ngram_range = (1, 3)`, `mmr_diversity = 0.5`,
+    /// `pmi_threshold = 1.0`).
+    ///
+    /// `label` is the ntype string stamped on every entity this adapter emits.
+    /// The caller owns the vocabulary — pass whatever label fits your graph
+    /// (e.g. `"Keyword"`, `"Tag"`, `"Concept"`, or any domain-specific type).
     #[must_use]
-    pub fn new(embedder: Arc<dyn Embedder>) -> Self {
+    pub fn new(embedder: Arc<dyn Embedder>, label: impl Into<String>) -> Self {
         Self {
             embedder,
             top_k: mnem_extract::keybert::DEFAULT_TOP_K,
             ngram_range: mnem_extract::keybert::DEFAULT_NGRAM_RANGE,
             mmr_diversity: mnem_extract::keybert::DEFAULT_MMR_DIVERSITY,
             pmi_threshold: mnem_extract::cooccurrence::DEFAULT_PMI_THRESHOLD,
+            label: label.into(),
             section_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Override the entity label. Returns `self` for chaining.
+    #[must_use]
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = label.into();
+        self
     }
 
     /// Override `top_k`. Returns `self` for chaining.
@@ -192,7 +209,7 @@ impl Extractor for KeyBertAdapter {
         entities
             .into_iter()
             .map(|e| EntitySpan {
-                kind: EntityKind::Keyword,
+                kind: self.label.clone(),
                 text: e.mention,
                 byte_range: e.span.0..e.span.1,
                 confidence: e.score.clamp(KEYBERT_MIN_CONFIDENCE, 1.0),

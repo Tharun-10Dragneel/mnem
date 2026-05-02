@@ -23,8 +23,9 @@
 //!       grouped until role returns to `user` or a cap is hit.
 //! - [`chunk::auto_chunker`] - picks a sensible [`ChunkerKind`] per
 //!   [`SourceKind`].
-//! - [`extract::RuleExtractor`] - deterministic rule-based NER over
-//!   URLs, emails, dates, keywords, and capitalized phrases.
+//! - [`extract::RuleExtractor`] - entity extractor that delegates to the
+//!   configured [`mnem_ner_providers::NerProvider`] (default: capitalized-phrase
+//!   heuristic). Provider labels pass through unconditionally.
 //! - [`pipeline::Ingester`] - end-to-end driver that writes Doc +
 //!   Chunk + Entity nodes and the relation edges between them into a
 //!   borrowed [`mnem_core::repo::Transaction`].
@@ -79,7 +80,7 @@ pub mod types;
 
 pub use chunk::{ChunkerKind, auto_chunker, chunk};
 pub use error::Error;
-pub use extract::{EntityKind, EntitySpan, Extractor, RelationSpan, RuleExtractor};
+pub use extract::{EntitySpan, Extractor, RelationSpan, RuleExtractor};
 #[cfg(feature = "keybert")]
 pub use extract_keybert::{KEYBERT_RELATION_LABEL, KeyBertAdapter};
 #[cfg(feature = "ollama")]
@@ -92,6 +93,10 @@ pub use types::{
     Chunk, ChunkerAuto, ConversationFormat, ExtractorConfig, IngestConfig, IngestResult, Message,
     Section, SourceKind,
 };
+// Re-export NerConfig so downstream crates (mnem-cli, mnem-mcp, mnem-http)
+// can refer to `mnem_ingest::NerConfig` without a direct dep on
+// mnem-ner-providers.
+pub use mnem_ner_providers::NerConfig;
 
 // Re-export Cid so downstream crates can refer to `mnem_ingest::Cid`
 // without having to pull mnem-core directly.

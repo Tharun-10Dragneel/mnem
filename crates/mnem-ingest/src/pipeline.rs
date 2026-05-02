@@ -47,7 +47,7 @@ use tracing::{debug, info_span};
 
 use crate::chunk::{ChunkerKind, chunk as run_chunker};
 use crate::error::Error;
-use crate::extract::{EntityKind, EntitySpan, Extractor, RuleExtractor};
+use crate::extract::{EntitySpan, Extractor, RuleExtractor};
 use crate::types::{Chunk, IngestConfig, IngestResult, Section, SourceKind};
 
 /// Heap-allocated, thread-safe handle to an embedder.
@@ -121,13 +121,27 @@ impl std::fmt::Debug for Ingester {
 }
 
 impl Ingester {
-    /// Construct an ingester with the default [`RuleExtractor`] and no
-    /// embedder.
+    /// Construct an ingester with a [`RuleExtractor`] configured from
+    /// `config.ner`, plus no embedder.
+    ///
+    /// # Panics
+    ///
+    /// Never panics — both `NerConfig::Rule` and `NerConfig::None` are
+    /// infallible. A future ONNX provider would return an error here;
+    /// callers that need error propagation should call
+    /// `mnem_ner_providers::open` themselves and use
+    /// [`Ingester::with_extractor`].
     #[must_use]
     pub fn new(config: IngestConfig) -> Self {
+        let ner = mnem_ner_providers::open(&config.ner)
+            .unwrap_or_else(|_| Box::new(mnem_ner_providers::RuleNer));
+        let extractor = RuleExtractor::new(
+            crate::types::ExtractorConfig::default(),
+            std::sync::Arc::from(ner),
+        );
         Self {
             config,
-            extractor: Box::new(RuleExtractor::default()),
+            extractor: Box::new(extractor),
             embedder: None,
             progress: None,
         }
@@ -235,7 +249,7 @@ impl Ingester {
         let mut node_count: u64 = 1;
         let mut relation_count: u64 = 0;
 
-        let mut entity_registry: BTreeMap<(EntityKind, String), NodeId> = BTreeMap::new();
+        let mut entity_registry: BTreeMap<(String, String), NodeId> = BTreeMap::new();
 
         for (chunk_idx, c) in chunks.iter().enumerate() {
             let chunk_id = self.commit_chunk(tx, c, doc_id, created_at_micros, source_kind_str)?;
@@ -253,12 +267,12 @@ impl Ingester {
             for section in sections.iter().filter(|s| section_in_chunk(s, c)) {
                 let ents = self.extractor.extract_entities(section);
                 for e in ents {
-                    let key = (e.kind, canonical(&e.text));
+                    let key = (e.kind.clone(), canonical(&e.text));
                     let ent_id = if let Some(existing) = entity_registry.get(&key) {
                         *existing
                     } else {
                         let id = NodeId::new_v7();
-                        let mut n = Node::new(id, e.kind.ntype()).with_summary(e.text.clone());
+                        let mut n = Node::new(id, e.kind.clone()).with_summary(e.text.clone());
                         n.props.insert(
                             "mnem:created_at".into(),
                             Ipld::Integer(i128::from(created_at_micros)),

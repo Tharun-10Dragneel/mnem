@@ -17,7 +17,10 @@ pub(crate) mod descriptions;
 // because the embed-providers crate only enters the dep tree under
 // that feature.
 #[cfg(feature = "summarize")]
-mod embed;
+pub(crate) mod embed;
+// Shared NER resolver for the ingest handler (always present since
+// mnem-ingest is an unconditional dep of mnem-mcp).
+pub(crate) mod ner;
 mod handlers;
 
 pub use descriptions::all_tools;

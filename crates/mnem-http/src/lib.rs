@@ -177,12 +177,13 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
         }
     })?;
 
-    // Resolve embed + sparse provider configs from the repo's
+    // Resolve embed + sparse + NER provider configs from the repo's
     // config.toml, if any. When present, ingest and retrieve paths
     // auto-run the corresponding provider so hybrid dense + sparse
     // retrieval fires end-to-end (same behaviour as the CLI).
     let embed_cfg = load_embed_config(&data_dir);
     let sparse_cfg = load_sparse_config(&data_dir);
+    let ner_cfg = load_ner_config(&data_dir);
 
     // `allow_labels` is gated behind the `MNEM_BENCH` env var. Off by
     // default so casual / single-tenant callers never stumble into
@@ -222,6 +223,7 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
         push_token,
         graph_cache: Arc::new(Mutex::new(state::GraphCache::default())),
         traverse_cfg: Arc::new(routes::traverse::TraverseAnswerCfg::default()),
+        ner_cfg,
     };
 
     // Permissive CORS for v1: the server binds to loopback by default
@@ -366,6 +368,36 @@ fn load_sparse_config(data_dir: &Path) -> Option<mnem_sparse_providers::Provider
                 path = %path.display(),
                 error = %e,
                 "config.toml [sparse] parse failed; sparse auto-encode disabled"
+            );
+            None
+        }
+    }
+}
+
+/// Load `ner` section from `<data_dir>/config.toml` if it exists.
+/// `None` means ingest paths will use `NerConfig::Rule` (the default).
+/// Also respects `MNEM_NER_PROVIDER` env var: "none" → `NerConfig::None`,
+/// any other value → `NerConfig::Rule`.
+fn load_ner_config(data_dir: &Path) -> Option<mnem_ingest::NerConfig> {
+    if let Ok(p) = std::env::var("MNEM_NER_PROVIDER") {
+        return Some(match p.to_ascii_lowercase().as_str() {
+            "none" => mnem_ingest::NerConfig::None,
+            _ => mnem_ingest::NerConfig::Rule,
+        });
+    }
+    #[derive(serde::Deserialize)]
+    struct MiniCfg {
+        ner: Option<mnem_ingest::NerConfig>,
+    }
+    let path = data_dir.join("config.toml");
+    let s = std::fs::read_to_string(&path).ok()?;
+    match toml::from_str::<MiniCfg>(&s) {
+        Ok(parsed) => parsed.ner,
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "config.toml [ner] parse failed; NER defaults to rule-based"
             );
             None
         }

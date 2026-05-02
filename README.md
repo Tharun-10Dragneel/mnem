@@ -302,15 +302,13 @@ mnem ships GraphRAG built in. One knob per stage, opt-in per query, never requir
 | **Vector lane** | always on | HNSW over per-commit dense embeddings (default 384-d MiniLM). |
 | **Sparse lane** | config-driven | BM25 + SPLADE-onnx, fused with vector via Reciprocal Rank Fusion. Toggled by `[sparse]` block in `config.toml`. |
 | **Vector candidate pool** | `--vector-cap <N>` | Lift the dense pool size from default 256. Higher = better long-tail recall, +cost. |
-| **Top-K** | `--top-k <N>` | Final returned set (default 10). |
-| **Label scope** | `--label <str>` | Confine retrieval to a sub-graph (per-user, per-conversation, per-tenant). |
+| **Result limit** | `--limit <N>` | Final returned set (default 10). Short form: `-n`. |
 | **Graph expansion** | `--graph-expand <N>` | Add N neighbours of top-K seeds via authored edges. Audit-recommended default `20` when graph is on. |
 | **Graph mode** | `--graph-mode <decay\|ppr>` | `decay` (default) = exponential weight by hop. `ppr` = Personalised PageRank over the hybrid adjacency index, paper-grade scoring for multi-hop. |
-| **Community filter** | `--community-filter` | Run Leiden community detection; drop low-coverage communities before fusion. Implicit `--community-min-coverage 0.1`. |
-| **KeyBERT extraction** | `--extractor keybert` | Ingest-time keyphrase enrichment. Strengthens sparse + community signals. |
+| **Community filter** | `--community-filter` | Run Leiden community detection; drop low-coverage communities before fusion. Default coverage threshold: `0.5`. |
+| **KeyBERT extraction** | `mnem ingest --extractor keybert` | Ingest-time keyphrase enrichment. Strengthens sparse + community signals. Pass at ingest, not retrieve. |
 | **Summarisation** | `--summarize` | Centroid + MMR summary of the top-K, with diversity. |
 | **Cross-encoder rerank** | `--rerank <provider:model>` | Post-fusion reorder. Supports `cohere:rerank-english-v3.0`, `voyage:rerank-1`, local. |
-| **Hybrid v4 boost** | `--hybrid-v4-boost` | Bench-harness BM25-style score boost. Mirrors MemPalace's `hybrid_v4` for apple-to-apple comparisons. NOT a default for production. |
 
 ### Quick examples
 
@@ -321,14 +319,14 @@ mnem retrieve "what does this project do"
 # Add multi-hop graph traversal
 mnem retrieve "..." --graph-expand 20
 
-# Full Palace-tier stack: graph-expand + community-filter + PPR + KeyBERT
-mnem retrieve "..." --graph-expand 20 --community-filter --graph-mode ppr --extractor keybert
+# Full stack: graph-expand + community-filter + PPR + rerank
+mnem retrieve "..." --graph-expand 20 --community-filter --graph-mode ppr --rerank cohere:rerank-english-v3.0
 
 # Stack a cross-encoder reranker on top
 mnem retrieve "..." --graph-expand 20 --community-filter --rerank cohere:rerank-english-v3.0
 
-# Per-user scoping
-mnem retrieve "..." --label user-42 --graph-expand 20
+# Ingest with KeyBERT keyphrase enrichment (strengthens sparse + community signals)
+mnem ingest --extractor keybert notes.md
 ```
 
 ### When to enable
@@ -337,7 +335,7 @@ mnem retrieve "..." --label user-42 --graph-expand 20
 - **Multi-hop / compositional questions**: `--graph-expand 20`
 - **Long history with cross-document references**: add `--community-filter`
 - **Recall ceiling needed**: stack `--rerank` on top
-- **Multi-tenant agent memory**: always `--label <tenant>`
+- **Keyphrase-enriched ingest**: `mnem ingest --extractor keybert` at ingest time
 
 Full retrieval architecture: [`docs/src/architecture/retrieval.md`](docs/src/architecture/retrieval.md)
 Tuning playbook: [`docs/src/guides/retrieval-tuning.md`](docs/src/guides/retrieval-tuning.md)
@@ -462,7 +460,8 @@ Full overview: [`docs/src/architecture/overview.md`](docs/src/architecture/overv
 | [`mnem-rerank-providers`](crates/mnem-rerank-providers) | Cohere, Voyage |
 | [`mnem-llm-providers`](crates/mnem-llm-providers) | OpenAI, Anthropic, Ollama |
 | [`mnem-ingest`](crates/mnem-ingest) | parse + chunk + extract pipeline |
-| [`mnem-extract`](crates/mnem-extract) | entity extraction (KeyBERT, NER) |
+| [`mnem-extract`](crates/mnem-extract) | entity extraction (KeyBERT, statistical NER) |
+| [`mnem-ner-providers`](crates/mnem-ner-providers) | NER provider trait + built-in providers (`RuleNer`, `NullNer`) |
 | [`mnem-bench`](crates/mnem-bench) | benchmark harness (LongMemEval, LoCoMo, etc.) |
 | [`mnem-graphrag`](crates/mnem-graphrag) | community summarisation, centroid + MMR |
 | [`mnem-ann`](crates/mnem-ann) | HNSW wrapper |

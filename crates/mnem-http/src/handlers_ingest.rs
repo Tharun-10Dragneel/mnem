@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use axum::Json;
 use axum::extract::{Multipart, State};
-use mnem_ingest::{ChunkerAuto, ChunkerKind, IngestConfig, Ingester, SourceKind, auto_chunker};
+use mnem_ingest::{ChunkerAuto, ChunkerKind, IngestConfig, Ingester, NerConfig, SourceKind, auto_chunker};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -89,6 +89,12 @@ pub(crate) struct IngestJsonBody {
     /// embedder. C3 FIX-3.
     #[serde(default)]
     pub extractor: Option<String>,
+    /// NER provider. `"rule"` (default) uses the capitalized-phrase
+    /// heuristic. `"none"` suppresses all entity extraction.
+    /// Overrides the server's configured `[ner]` section for this
+    /// request only.
+    #[serde(default)]
+    pub ner_provider: Option<String>,
 }
 
 /// `POST /v1/ingest` dispatcher. Detects the request's
@@ -137,6 +143,7 @@ async fn ingest_multipart(state: AppState, mut multipart: Multipart) -> Result<J
     let mut author: Option<String> = None;
     let mut message: Option<String> = None;
     let mut extractor: Option<String> = None;
+    let mut ner_provider: Option<String> = None;
 
     let max_bytes = max_ingest_bytes();
 
@@ -181,6 +188,7 @@ async fn ingest_multipart(state: AppState, mut multipart: Multipart) -> Result<J
             "author" => author = Some(field_text(field).await?),
             "message" => message = Some(field_text(field).await?),
             "extractor" => extractor = Some(field_text(field).await?),
+            "ner_provider" => ner_provider = Some(field_text(field).await?),
             other => {
                 // Ignore unknown fields rather than 400: clients that
                 // add forward-compatible metadata (trace_id,
@@ -210,6 +218,7 @@ async fn ingest_multipart(state: AppState, mut multipart: Multipart) -> Result<J
             author,
             message: message.unwrap_or_else(|| "mnem http ingest".into()),
             extractor,
+            ner_provider,
         },
     )
 }
@@ -254,6 +263,7 @@ async fn ingest_json(state: AppState, body: IngestJsonBody) -> Result<Json<Value
             author: body.author,
             message: body.message.unwrap_or_else(|| "mnem http ingest".into()),
             extractor: body.extractor,
+            ner_provider: body.ner_provider,
         },
     )
 }
@@ -268,6 +278,9 @@ struct IngestParams {
     message: String,
     /// C3 FIX-3: extractor selector, defaults to `"none"` (rule-based).
     extractor: Option<String>,
+    /// NER provider override for this request. `None` defers to the
+    /// server's `AppState::ner_cfg` (which itself falls back to Rule).
+    ner_provider: Option<String>,
 }
 
 /// Shared execution path: clamp, build Ingester, run the pipeline,
@@ -292,12 +305,24 @@ fn run_ingest(
         params.message = "mnem http ingest".into();
     }
 
+    // Resolve NER config: per-request override → server default → Rule.
+    let ner = match params.ner_provider.as_deref() {
+        Some("none") => NerConfig::None,
+        Some("rule") | None => state.ner_cfg.clone().unwrap_or(NerConfig::Rule),
+        Some(other) => {
+            return Err(Error::bad_request(format!(
+                "unknown `ner_provider`: {other}; want one of rule|none"
+            )));
+        }
+    };
+
     let chunker = resolve_chunker(&params.chunker, kind, params.max_tokens, params.overlap)?;
     let config = IngestConfig {
         chunker,
         ntype: params.ntype,
         max_tokens: params.max_tokens,
         overlap: params.overlap,
+        ner,
     };
     let mut ing = Ingester::new(config);
 
@@ -319,7 +344,7 @@ fn run_ingest(
             })?;
             let arc: std::sync::Arc<dyn mnem_embed_providers::Embedder> =
                 std::sync::Arc::from(boxed);
-            ing = ing.with_extractor(Box::new(mnem_ingest::KeyBertAdapter::new(arc)));
+            ing = ing.with_extractor(Box::new(mnem_ingest::KeyBertAdapter::new(arc, "Keyword")));
         }
         Some(other) => {
             return Err(Error::bad_request(format!(

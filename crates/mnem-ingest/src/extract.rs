@@ -1,13 +1,11 @@
-//! Rule-based entity + relation extraction over parsed [`Section`]s.
+//! Entity + relation extraction over parsed [`Section`]s.
 //!
-//! Phase-B5c ships a deterministic, dependency-light NER baseline. Three
-//! layers cooperate:
-//!
-//! 1. **Regex** for structured surface forms (URLs, emails, ISO-8601 dates,
-//! "`Mon DD, YYYY`" dates). Confidence `0.95`.
-//! 2. **Aho-Corasick** for a caller-supplied keyword list. Confidence `0.90`.
-//! 3. **Capitalized-phrase heuristic** for Person / Organization (2+
-//! consecutive capitalized tokens, denylist filtered). Confidence `0.60`.
+//! Entity extraction is delegated entirely to the configured
+//! [`mnem_ner_providers::NerProvider`]. The default is
+//! [`mnem_ner_providers::RuleNer`] (capitalized-phrase heuristic).
+//! Swap for [`mnem_ner_providers::NullNer`] or any future provider via
+//! [`IngestConfig::ner`]. Provider labels pass through unconditionally —
+//! there is no fixed vocabulary.
 //!
 //! Relations are proximity-based: two entity spans whose start positions
 //! are within `window_tokens` of each other in the same [`Section`] get a
@@ -15,18 +13,11 @@
 //! verb-between check promotes that to `"acts_on"` (confidence `0.50`)
 //! when a token like `"joined"`, `"founded"`, `"acquired"`, `"owns"`, or
 //! `"hired"` sits between the two spans.
-//!
-//! LLM-driven extraction is explicitly deferred to Phase-B5e. The public
-//! [`Extractor`] trait is the extension point; the default
-//! [`RuleExtractor`] ships here so every downstream call-site has a
-//! working implementation on day one.
-//!
-//! Every public item is documented - the crate carries
-//! `#![deny(missing_docs)]` and `#![forbid(unsafe_code)]`.
 
 use std::ops::Range;
+use std::sync::Arc;
 
-use aho_corasick::{AhoCorasick, MatchKind};
+use mnem_ner_providers::NerProvider;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -34,59 +25,19 @@ use crate::types::{ExtractorConfig, Section};
 
 // ---------------- Types ----------------
 
-/// Coarse category assigned to an [`EntitySpan`].
-///
-/// The set is intentionally small; richer ontologies ride in later
-/// waves on top of an LLM or gazetteer-driven extractor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityKind {
-    /// A natural person ("Alice", "Barack Obama"). Produced by the
-    /// capitalized-phrase heuristic; never by regex.
-    Person,
-    /// An organization (`"Acme Corp"`, `"OpenAI"`). Produced by the
-    /// capitalized-phrase heuristic with an org-hint suffix list.
-    Organization,
-    /// A place ("Berlin", "New York"). Reserved - the baseline does not
-    /// emit these, but the variant exists so the extension point is stable.
-    Location,
-    /// A calendar date (ISO-8601 `YYYY-MM-DD` or `Mon DD, YYYY`).
-    Date,
-    /// A URL (`http`/`https` schemes).
-    Url,
-    /// An email address (`local@domain.tld`).
-    Email,
-    /// A user-supplied keyword (see [`ExtractorConfig::keywords`]).
-    Keyword,
-}
-
-impl EntityKind {
-    /// Short lower-snake-case string used as the `Node::ntype` for the
-    /// entity node committed downstream. Stable wire identifier.
-    #[must_use]
-    pub const fn ntype(self) -> &'static str {
-        match self {
-            Self::Person => "person",
-            Self::Organization => "organization",
-            Self::Location => "location",
-            Self::Date => "date",
-            Self::Url => "url",
-            Self::Email => "email",
-            Self::Keyword => "keyword",
-        }
-    }
-}
-
 /// A single entity mention inside a [`Section`].
 ///
 /// `byte_range` refers to offsets within the section's `text` field
 /// (not the original source). Downstream commit code combines it with
 /// `Section::byte_range` when provenance-accurate source offsets are
 /// needed.
+///
+/// `kind` is the namespaced ntype string (e.g. `"Entity:Person"`).
+/// Using a `String` keeps the type open for any NER provider label vocabulary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntitySpan {
-    /// Category assigned by the extractor.
-    pub kind: EntityKind,
+    /// Namespaced ntype label string (e.g. `"Entity:Person"`).
+    pub kind: String,
     /// Verbatim surface string as it appears in the section text.
     pub text: String,
     /// Byte range within the section's `text`.
@@ -133,22 +84,6 @@ pub trait Extractor: Send + Sync {
     /// list of sections the file produced. The default implementation
     /// is a no-op, so existing extractors keep their behaviour.
     ///
-    /// the [`crate::extract_keybert::KeyBertAdapter`]
-    /// override pre-batches every section's embedding through
-    /// `Embedder::embed_batch` and stashes the vectors in an internal
-    /// cache, so subsequent `extract_entities` calls hit the cache
-    /// instead of issuing one ORT session.run per section. Bible-
-    /// scale ingest drops from "single-threaded sequential section
-    /// embed dominates wall time" to "one batched session.run per
-    /// file."
-    ///
-    /// Implementations MUST be idempotent: callers may invoke
-    /// `prepare` multiple times across re-uses of the same extractor
-    /// without changing entity output. Errors should be swallowed
-    /// internally where possible (the default fall-back to lazy
-    /// per-section embed must remain correct); a hard error here
-    /// aborts the whole file ingest.
-    ///
     /// # Errors
     ///
     /// Returns whatever the implementation chooses; the pipeline
@@ -160,131 +95,79 @@ pub trait Extractor: Send + Sync {
 
 // ---------------- Default rule extractor ----------------
 
-/// Default rule-based [`Extractor`] implementation shipped with
-/// mnem-ingest.
+/// [`Extractor`] implementation that delegates entity detection to the
+/// configured [`NerProvider`] and proximity-based relation detection to an
+/// internal verb-window regex.
 ///
-/// Construct via [`RuleExtractor::new`] with an [`ExtractorConfig`].
-/// Internally caches compiled regex + Aho-Corasick matchers so calls
-/// across many sections reuse the automaton.
-#[derive(Debug)]
+/// Construct via [`RuleExtractor::new`] or [`RuleExtractor::with_default_ner`].
 pub struct RuleExtractor {
     cfg: ExtractorConfig,
-    url: Regex,
-    email: Regex,
-    iso_date: Regex,
-    long_date: Regex,
-    keywords: Option<AhoCorasick>,
     verb_window: Regex,
+    ner: Arc<dyn NerProvider>,
+}
+
+impl std::fmt::Debug for RuleExtractor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuleExtractor")
+            .field("cfg", &self.cfg)
+            .field("ner", &self.ner.provider_id())
+            .finish()
+    }
 }
 
 impl RuleExtractor {
-    /// Build a new extractor from configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `regex::Error` if any of the embedded patterns fails to
-    /// compile. The patterns are fixed at compile time, so callers can
-    /// treat this as infallible in practice; the error is surfaced only
-    /// for symmetry with the aho-corasick builder.
+    /// Build a new extractor from configuration and a NER provider.
     #[allow(clippy::missing_panics_doc)]
     #[must_use]
-    pub fn new(cfg: ExtractorConfig) -> Self {
-        // Patterns are fixed, and panicking here on a miscompiled regex
-        // would be a compile-time surprise, not a runtime one. The
-        // `expect` messages are intentional; they cannot fire.
-        let url = Regex::new(r"https?://[^\s<>()\[\]]+[A-Za-z0-9/]").expect("url regex compiles");
-        let email = Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
-            .expect("email regex compiles");
-        let iso_date = Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").expect("iso date regex compiles");
-        let long_date = Regex::new(
-            r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}, \d{4}\b",
-        )
-        .expect("long date regex compiles");
+    pub fn new(cfg: ExtractorConfig, ner: Arc<dyn NerProvider>) -> Self {
         let verb_window = Regex::new(
             r"(?i)\b(?:joined|founded|acquired|owns|hired|created|launched|bought|leads|runs)\b",
         )
         .expect("verb regex compiles");
+        Self { cfg, verb_window, ner }
+    }
 
-        let keywords = if cfg.keywords.is_empty() {
-            None
-        } else {
-            AhoCorasick::builder()
-                .match_kind(MatchKind::LeftmostLongest)
-                .ascii_case_insensitive(true)
-                .build(&cfg.keywords)
-                .ok()
-        };
-
-        Self {
-            cfg,
-            url,
-            email,
-            iso_date,
-            long_date,
-            keywords,
-            verb_window,
-        }
+    /// Build with the default [`mnem_ner_providers::RuleNer`] provider.
+    #[must_use]
+    pub fn with_default_ner(cfg: ExtractorConfig) -> Self {
+        Self::new(cfg, Arc::new(mnem_ner_providers::RuleNer))
     }
 }
 
 impl Default for RuleExtractor {
     fn default() -> Self {
-        Self::new(ExtractorConfig::default())
+        Self::with_default_ner(ExtractorConfig::default())
     }
 }
 
 impl Extractor for RuleExtractor {
     fn extract_entities(&self, section: &Section) -> Vec<EntitySpan> {
+        if !self.cfg.extract_ner {
+            return Vec::new();
+        }
         let text = section.text.as_str();
-        let mut out: Vec<EntitySpan> = Vec::new();
+        let mut out: Vec<EntitySpan> = self
+            .ner
+            .extract(text)
+            .into_iter()
+            .filter_map(|ne| {
+                if ne.label.trim().is_empty() { return None; }
+                let slice = text.get(ne.byte_start..ne.byte_end)?.to_string();
+                if slice.is_empty() { return None; }
+                Some(EntitySpan {
+                    kind: ne.label,
+                    text: slice,
+                    byte_range: ne.byte_start..ne.byte_end,
+                    confidence: ne.confidence,
+                })
+            })
+            .collect();
 
-        if self.cfg.emit_kinds.contains(&EntityKind::Url) {
-            collect_regex(&mut out, &self.url, text, EntityKind::Url, 0.95);
-        }
-        if self.cfg.emit_kinds.contains(&EntityKind::Email) {
-            collect_regex(&mut out, &self.email, text, EntityKind::Email, 0.95);
-        }
-        if self.cfg.emit_kinds.contains(&EntityKind::Date) {
-            collect_regex(&mut out, &self.iso_date, text, EntityKind::Date, 0.95);
-            collect_regex(&mut out, &self.long_date, text, EntityKind::Date, 0.95);
-        }
-
-        if self.cfg.emit_kinds.contains(&EntityKind::Keyword)
-            && let Some(ac) = &self.keywords
-        {
-            for m in ac.find_iter(text) {
-                push_span(
-                    &mut out,
-                    EntityKind::Keyword,
-                    text,
-                    m.start()..m.end(),
-                    0.90,
-                );
-            }
-        }
-
-        let want_person = self.cfg.emit_kinds.contains(&EntityKind::Person);
-        let want_org = self.cfg.emit_kinds.contains(&EntityKind::Organization);
-        if want_person || want_org {
-            for (kind, range) in capitalized_phrases(text) {
-                let keep = match kind {
-                    EntityKind::Organization => want_org,
-                    EntityKind::Person => want_person,
-                    _ => false,
-                };
-                if keep {
-                    push_span(&mut out, kind, text, range, 0.60);
-                }
-            }
-        }
-
-        // Deterministic ordering: primary by start offset, secondary by
-        // kind so dedup is stable across runs.
         out.sort_by(|a, b| {
             a.byte_range
                 .start
                 .cmp(&b.byte_range.start)
-                .then_with(|| a.kind.ntype().cmp(b.kind.ntype()))
+                .then_with(|| a.kind.as_str().cmp(b.kind.as_str()))
         });
         out.dedup_by(|a, b| a.byte_range == b.byte_range && a.kind == b.kind);
         out
@@ -303,7 +186,6 @@ impl Extractor for RuleExtractor {
                 let a = &entities[i];
                 let b = &entities[j];
                 if a.byte_range.end > b.byte_range.start {
-                    // Overlapping - skip to avoid a self-relation artifact.
                     continue;
                 }
                 let between = &text[a.byte_range.end..b.byte_range.start];
@@ -331,150 +213,15 @@ impl Extractor for RuleExtractor {
 // ---------------- Free helpers ----------------
 
 /// Run [`RuleExtractor::default`] once against a section.
-///
-/// Thin convenience for callers that don't care to configure the
-/// extractor (tests, `mnem ingest --auto`, ad-hoc scripts).
 #[must_use]
 pub fn extract_entities(section: &Section) -> Vec<EntitySpan> {
     RuleExtractor::default().extract_entities(section)
 }
 
 /// Run [`RuleExtractor::default`] once to derive relations.
-///
-/// Expects `entities` to have been produced by the same extractor; the
-/// relation indices only make sense against that exact list.
 #[must_use]
 pub fn extract_relations(entities: &[EntitySpan], section: &Section) -> Vec<RelationSpan> {
     RuleExtractor::default().extract_relations(entities, section)
-}
-
-fn collect_regex(
-    out: &mut Vec<EntitySpan>,
-    re: &Regex,
-    text: &str,
-    kind: EntityKind,
-    confidence: f32,
-) {
-    for m in re.find_iter(text) {
-        push_span(out, kind, text, m.start()..m.end(), confidence);
-    }
-}
-
-fn push_span(
-    out: &mut Vec<EntitySpan>,
-    kind: EntityKind,
-    text: &str,
-    range: Range<usize>,
-    confidence: f32,
-) {
-    let slice = text.get(range.clone()).unwrap_or("").to_string();
-    if slice.is_empty() {
-        return;
-    }
-    out.push(EntitySpan {
-        kind,
-        text: slice,
-        byte_range: range,
-        confidence,
-    });
-}
-
-/// Common words a capitalized-phrase run is likely to swallow but that
-/// carry no entity meaning. Kept deliberately small - false positives at
-/// this layer are filtered downstream by the LLM extractor in B5e.
-const COMMON_DENYLIST: &[&str] = &[
-    "The", "This", "That", "These", "Those", "A", "An", "And", "Or", "But", "If", "In", "On", "At",
-    "To", "From", "With", "By", "For", "Of", "As", "Is", "Was", "Are", "Were", "Be", "Been",
-    "Being", "I", "We", "You", "He", "She", "It", "They", "My", "Our", "Your", "His", "Her",
-    "Their", "Mr", "Mrs", "Ms", "Dr",
-];
-
-/// Suffix tokens that promote a capitalized run from Person to
-/// Organization (e.g. "`Acme Corp`", "`Foo Inc`"). Case-sensitive on the
-/// suffix but matched against the trimmed token.
-const ORG_SUFFIXES: &[&str] = &[
-    "Inc",
-    "Inc.",
-    "LLC",
-    "Ltd",
-    "Ltd.",
-    "Corp",
-    "Corp.",
-    "Corporation",
-    "Company",
-    "Co",
-    "Co.",
-    "GmbH",
-    "AG",
-    "SA",
-    "BV",
-    "PLC",
-];
-
-/// Walk the text, emitting `(kind, byte_range)` for every run of two or
-/// more capitalized tokens. Heuristic, not linguistic.
-fn capitalized_phrases(text: &str) -> Vec<(EntityKind, Range<usize>)> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    let len = bytes.len();
-
-    while i < len {
-        // Skip non-letter.
-        if !is_ascii_upper(bytes[i]) {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        let mut last_end = i;
-        let mut token_count = 0;
-        let mut saw_org_suffix = false;
-
-        while i < len && is_ascii_upper(bytes[i]) {
-            // Consume a capitalized token: upper then [A-Za-z.]*.
-            let tok_start = i;
-            i += 1;
-            while i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'.') {
-                i += 1;
-            }
-            let tok = &text[tok_start..i];
-            if COMMON_DENYLIST.contains(&tok) && token_count == 0 {
-                // Leading common word - bail and restart after it.
-                token_count = 0;
-                last_end = i;
-                break;
-            }
-            token_count += 1;
-            last_end = i;
-            if ORG_SUFFIXES.contains(&tok) {
-                saw_org_suffix = true;
-            }
-            // Expect a single space before the next capitalized token.
-            if i < len && bytes[i] == b' ' && i + 1 < len && is_ascii_upper(bytes[i + 1]) {
-                i += 1;
-                continue;
-            }
-            break;
-        }
-
-        if token_count >= 2 {
-            let kind = if saw_org_suffix {
-                EntityKind::Organization
-            } else {
-                EntityKind::Person
-            };
-            out.push((kind, start..last_end));
-        }
-        // Advance past whitespace so the outer loop makes progress.
-        while i < len && !is_ascii_upper(bytes[i]) {
-            i += 1;
-        }
-    }
-    out
-}
-
-const fn is_ascii_upper(b: u8) -> bool {
-    b.is_ascii_uppercase()
 }
 
 // ---------------- Tests ----------------
@@ -493,109 +240,34 @@ mod tests {
     }
 
     #[test]
-    fn extracts_urls() {
-        let s = section("See https://example.com/x and http://foo.io for details.");
-        let ents = extract_entities(&s);
-        let urls: Vec<_> = ents.iter().filter(|e| e.kind == EntityKind::Url).collect();
-        assert_eq!(urls.len(), 2);
-        assert!(
-            urls.iter()
-                .any(|e| e.text.starts_with("https://example.com"))
-        );
-        assert!(urls.iter().any(|e| e.text.starts_with("http://foo.io")));
-    }
-
-    #[test]
-    fn extracts_emails() {
-        let s = section("Contact alice@example.com or bob.smith+x@corp.co.uk today.");
-        let ents = extract_entities(&s);
-        let emails: Vec<_> = ents
-            .iter()
-            .filter(|e| e.kind == EntityKind::Email)
-            .collect();
-        assert_eq!(emails.len(), 2);
-        assert!(emails.iter().any(|e| e.text == "alice@example.com"));
-    }
-
-    #[test]
-    fn rejects_non_email_atsign() {
-        let s = section("the @handle tag is not email, nor is foo@.");
-        let ents = extract_entities(&s);
-        assert!(!ents.iter().any(|e| e.kind == EntityKind::Email));
-    }
-
-    #[test]
-    fn extracts_iso_and_long_dates() {
-        let s = section("Filed on 2026-04-24; rescheduled to Apr 30, 2026.");
-        let ents = extract_entities(&s);
-        let dates = ents.iter().filter(|e| e.kind == EntityKind::Date).count();
-        assert_eq!(dates, 2);
-    }
-
-    #[test]
-    fn ignores_bogus_date() {
-        let s = section("version 1.2.3 released last year");
-        let ents = extract_entities(&s);
-        assert!(!ents.iter().any(|e| e.kind == EntityKind::Date));
-    }
-
-    #[test]
-    fn extracts_keyword_matches() {
-        let cfg = ExtractorConfig {
-            keywords: vec!["rustls".into(), "tokio".into()],
-            ..ExtractorConfig::default()
-        };
-        let ext = RuleExtractor::new(cfg);
-        let s = section("Built on rustls and Tokio for async I/O.");
-        let ents = ext.extract_entities(&s);
-        let kw = ents
-            .iter()
-            .filter(|e| e.kind == EntityKind::Keyword)
-            .count();
-        assert_eq!(kw, 2, "got: {ents:?}");
-    }
-
-    #[test]
-    fn no_keyword_when_denied() {
-        let cfg = ExtractorConfig::default();
-        let ext = RuleExtractor::new(cfg);
-        let s = section("This body has no keyword configured at all.");
-        let ents = ext.extract_entities(&s);
-        assert!(!ents.iter().any(|e| e.kind == EntityKind::Keyword));
-    }
-
-    #[test]
-    fn capitalized_phrase_detects_person() {
+    fn ner_detects_person() {
         let s = section("Alice Johnson met Bob Lee at the lobby.");
         let ents = extract_entities(&s);
         assert!(
-            ents.iter()
-                .any(|e| e.kind == EntityKind::Person && e.text == "Alice Johnson"),
+            ents.iter().any(|e| e.text == "Alice Johnson"),
             "got: {ents:?}"
         );
         assert!(
-            ents.iter()
-                .any(|e| e.kind == EntityKind::Person && e.text == "Bob Lee"),
+            ents.iter().any(|e| e.text == "Bob Lee"),
             "got: {ents:?}"
         );
     }
 
     #[test]
-    fn capitalized_phrase_detects_org_suffix() {
+    fn ner_detects_org() {
         let s = section("Acme Corp and Foo Inc signed the deal.");
         let ents = extract_entities(&s);
         assert!(
-            ents.iter()
-                .any(|e| e.kind == EntityKind::Organization && e.text == "Acme Corp"),
+            ents.iter().any(|e| e.text == "Acme Corp"),
             "got: {ents:?}"
         );
     }
 
     #[test]
-    fn capitalized_rejects_single_token() {
+    fn ner_single_token_not_detected() {
         let s = section("Alice then left.");
         let ents = extract_entities(&s);
-        assert!(!ents.iter().any(|e| e.kind == EntityKind::Person));
+        assert!(ents.is_empty(), "single-token should not match: {ents:?}");
     }
 
     #[test]
@@ -621,21 +293,33 @@ mod tests {
     }
 
     #[test]
-    fn confidence_tiers_respected() {
-        let s = section("Alice Johnson visited https://example.com on 2026-04-24.");
+    fn confidence_in_unit_range() {
+        let s = section("Alice Johnson and Bob Lee work at Acme Corp.");
         let ents = extract_entities(&s);
+        assert!(!ents.is_empty(), "expected at least one entity from NER");
         for e in &ents {
-            match e.kind {
-                EntityKind::Url | EntityKind::Date | EntityKind::Email => {
-                    assert!((e.confidence - 0.95).abs() < f32::EPSILON);
-                }
-                EntityKind::Person | EntityKind::Organization | EntityKind::Location => {
-                    assert!((e.confidence - 0.60).abs() < f32::EPSILON);
-                }
-                EntityKind::Keyword => {
-                    assert!((e.confidence - 0.90).abs() < f32::EPSILON);
-                }
-            }
+            assert!(
+                (0.0..=1.0).contains(&e.confidence),
+                "confidence {} out of [0,1] for {:?}",
+                e.confidence,
+                e
+            );
         }
+    }
+
+    #[test]
+    fn null_ner_produces_no_entities() {
+        use mnem_ner_providers::NullNer;
+        let ext = RuleExtractor::new(ExtractorConfig::default(), Arc::new(NullNer));
+        let s = section("Alice Johnson founded Acme Corp.");
+        assert!(ext.extract_entities(&s).is_empty(), "NullNer must produce nothing");
+    }
+
+    #[test]
+    fn extract_ner_false_produces_no_entities() {
+        let cfg = ExtractorConfig { extract_ner: false, ..ExtractorConfig::default() };
+        let ext = RuleExtractor::with_default_ner(cfg);
+        let s = section("Alice Johnson founded Acme Corp.");
+        assert!(ext.extract_entities(&s).is_empty());
     }
 }
