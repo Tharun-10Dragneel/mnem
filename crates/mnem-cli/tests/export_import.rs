@@ -26,10 +26,10 @@ fn mnem(repo: &Path, args: &[&str]) -> Command {
 }
 
 #[test]
-fn export_empty_repo_fails_cleanly() {
-    // A freshly-initialised repo has no head commit, so `mnem export`
-    // with the default `--from HEAD` must fail with an actionable
-    // error rather than a panic or an empty-CAR write.
+fn freshly_initialized_repo_exports_successfully() {
+    // `mnem init` always seeds a Meta anchor node (seed_anchor_node),
+    // so a freshly-initialised repo always has a head commit and
+    // `mnem export` must succeed rather than returning an error.
     let dir = TempDir::new().unwrap();
     // `init` takes an explicit positional path (it ignores `-R`).
     mnem(dir.path(), &["init", dir.path().to_str().unwrap()])
@@ -39,11 +39,11 @@ fn export_empty_repo_fails_cleanly() {
     let car = dir.path().join("out.car");
     let out = mnem(dir.path(), &["export", car.to_str().unwrap()])
         .assert()
-        .failure();
-    let stderr = String::from_utf8_lossy(&out.get_output().stderr).to_string();
+        .success();
+    let stdout = String::from_utf8_lossy(&out.get_output().stdout).to_string();
     assert!(
-        stderr.contains("no commits") || stderr.contains("nothing to export"),
-        "expected actionable error message, got: {stderr}"
+        stdout.contains("exported") && stdout.contains("blocks"),
+        "expected export confirmation, got: {stdout}"
     );
 }
 
