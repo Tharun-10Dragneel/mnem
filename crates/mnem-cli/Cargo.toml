@@ -46,14 +46,14 @@ workspace = true
 # (user-global). Either overrides the bundled fallback.
 [features]
 default = ["bundled-embedder"]
-bundled-embedder = ["mnem-embed-providers/onnx-bundled"]
+bundled-embedder = ["mnem-embed-providers/onnx-bundled", "mnem-mcp/bundled-embedder"]
 # GPU execution-provider variants. Forward to the matching feature on
 # `mnem-embed-providers` so the CLI ships a self-contained binary that
 # routes inference through CUDA or DirectML when available, with the
 # CPU EP as a runtime fallback. 5-15x speedup on a supported GPU; same
 # vectors as the CPU build (small fp rounding differences only).
-bundled-embedder-cuda = ["mnem-embed-providers/onnx-bundled-cuda"]
-bundled-embedder-directml = ["mnem-embed-providers/onnx-bundled-directml"]
+bundled-embedder-cuda = ["mnem-embed-providers/onnx-bundled-cuda", "mnem-mcp/bundled-embedder-cuda"]
+bundled-embedder-directml = ["mnem-embed-providers/onnx-bundled-directml", "mnem-mcp/bundled-embedder-directml"]
 
 # cargo-binstall metadata: lets `cargo binstall mnem-cli` fetch the
 # prebuilt archive from the GitHub release instead of compiling from

@@ -409,11 +409,12 @@ need to mention mnem.
 
 ## Reading memory (before you answer)
 
-A `UserPromptSubmit` hook has already called `mnem global retrieve` and
-injected the results as context before this conversation turn. Look for the
-hook output in context — **do NOT make an additional `mnem_global_retrieve`
-call**. Only call `mnem_global_retrieve` explicitly if the hook output is
-absent or empty (e.g. the hook was disabled).
+A `UserPromptSubmit` hook has already run: it calls `mnem retrieve` (local
+graph, current project) first; if no local graph is found it falls back to
+`mnem global retrieve` (global graph). Look for the hook output in context —
+**do NOT duplicate those calls**. If the hook output is absent or empty,
+call `mnem_retrieve` first; if that errors (no local graph), call
+`mnem_global_retrieve` as fallback.
 
 ## Writing memory (after you answer)
 
@@ -424,6 +425,10 @@ are redundant and will diverge. Commit everything to mnem only.
 After each turn, commit any new facts, preferences, events, or entities
 the user stated or confirmed. Use these rules:
 
+- **Local first**: default to `mnem_commit`, `mnem_resolve_or_create`, and
+  `mnem_commit_relation` (local repo). Use `mnem_global_add` or
+  `mnem_global_ingest` only when the user explicitly says "global", or when
+  the local repo is unavailable.
 - One fact per node. Never combine two separate facts in one summary.
 - Every summary must be a complete standalone sentence. No leading pronouns
   ("she", "they", "the above").
@@ -462,7 +467,9 @@ Any descriptive predicate is valid. Common examples:
 ## Forgetting
 
 When the user says "forget X", "stop remembering X", or revokes consent:
-1. Call `mnem_global_retrieve` to find the relevant node UUID.
+1. Call `mnem_retrieve` to find the relevant node UUID (use
+   `mnem_global_retrieve` if the fact was stored globally or local
+   retrieval finds nothing).
 2. Call `mnem_tombstone_node` with the UUID and the user's own phrasing
    as `reason`.
 3. Confirm to the user briefly: "Removed."
@@ -473,8 +480,8 @@ When the user updates a previously stated fact (e.g. "actually I moved
 to Paris" after "I live in Berlin"):
 1. Resolve or create the new fact node.
 2. Add a `revoked_by` edge from the old node to the new one.
-   `mnem_global_retrieve` filters out revoked nodes by default, so the old
-   fact stops surfacing without losing the audit trail.
+   `mnem_retrieve` / `mnem_global_retrieve` filter out revoked nodes by
+   default, so the old fact stops surfacing without losing the audit trail.
 
 ## `agent_id`
 
@@ -487,12 +494,11 @@ the user can audit which agent wrote what.
 ## If MCP tools are unavailable (CLI fallback)
 
 If the `mnem_*` MCP tools are not listed as available, fall back to CLI:
-- **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label <type>`
-  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
-- **NEVER** use bare `mnem commit` or `mnem retrieve` — those operate on
-  the local repo store, not the global memory, so facts silently vanish
-  the next session.
+- **Read**: `mnem retrieve "query text"` (local first). If that errors
+  (no .mnem in the current directory), use `mnem global retrieve "query text"`.
+- **Write**: `mnem commit` for the local repo; `mnem global add node -s "..."
+  --label <type>` for the global graph. Only use global when the user says
+  "global" or no local .mnem exists.
 
 ## When NOT to use mnem
 
@@ -514,9 +520,10 @@ treats them as the default reading and writing channel for facts the
 user shares.
 
 The pre-prompt hook (wired automatically by `mnem integrate` for
-supported hosts) gives a stronger guarantee: it forces a
-`mnem_global_retrieve` call before the LLM ever sees the user's
-message. Pair the two for the strongest "automatic memory" experience.
+supported hosts) gives a stronger guarantee: it runs `mnem retrieve`
+(local) before the LLM ever sees the user's message, falling back to
+`mnem global retrieve` if no local graph is found. Pair the two for
+the strongest "automatic memory" experience.
 
 ## See also
 
@@ -534,10 +541,14 @@ needs to mention mnem.
 
 ## MANDATORY: Read memory before every answer
 
-Call `mnem_global_retrieve` at the START of EVERY response without exception.
+Call `mnem_retrieve` at the START of EVERY response without exception.
 - `text` = the user's message, `token_budget` = 2000
 - Never skip: short questions, greetings, code tasks — none are exempt.
 - This host has no automatic pre-prompt hook. YOU are the only retrieval trigger.
+- If `mnem_retrieve` errors or the server has no local repo configured, also
+  call `mnem_global_retrieve` as fallback.
+- Only call `mnem_global_retrieve` explicitly when the user says "global" or
+  local retrieval is unavailable.
 - If results surface, weave them into your answer naturally; never announce it.
 
 ## MANDATORY: Write memory after every turn with new facts
@@ -548,6 +559,10 @@ MEMORY.md indexes, or any other file-based notes — use mnem only.
 After EVERY turn where the user stated, corrected, or confirmed any fact,
 preference, event, entity, or goal — commit it SILENTLY without asking first.
 
+- **Local first**: use `mnem_commit`, `mnem_resolve_or_create`, and
+  `mnem_commit_relation` for all writes by default. Use `mnem_global_add` or
+  `mnem_global_ingest` only when the user explicitly says "global" or local
+  is unavailable.
 - One fact per node. Never merge two separate facts.
 - `summary` must be a complete standalone sentence (no leading pronouns).
 - Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
@@ -573,8 +588,9 @@ predicate is valid. Common: `works_at`, `lives_in`, `has_preference`,
 
 ## Forgetting
 
-User says "forget X": `mnem_global_retrieve` to find the node →
-`mnem_tombstone_node` with their wording as `reason`. Reply: "Removed."
+User says "forget X": `mnem_retrieve` to find the node (fall back to
+`mnem_global_retrieve` if not found locally) → `mnem_tombstone_node`
+with their wording as `reason`. Reply: "Removed."
 
 ## Supersession
 
@@ -583,11 +599,10 @@ edge from the old node to the new. The old fact stops surfacing automatically.
 
 ## CLI fallback (if MCP tools are unavailable)
 
-- **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label <type>`
-  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
-- **NEVER** use bare `mnem commit` or `mnem retrieve` — those use the
-  local repo store; facts will be invisible next session.
+- **Read**: `mnem retrieve "query text"` (local first). If that errors
+  (no .mnem in the current directory), use `mnem global retrieve "query text"`.
+- **Write**: `mnem commit` for local; `mnem global add node -s "..." --label <type>`
+  for global. Only use global when the user says "global" or no local .mnem exists.
 
 ## When NOT to commit
 
@@ -608,10 +623,14 @@ needs to mention mnem.
 
 ## MANDATORY: Read memory before every answer
 
-Call `mnem_global_retrieve` at the START of EVERY response without exception.
+Call `mnem_retrieve` at the START of EVERY response without exception.
 - `text` = the user's message, `token_budget` = 2000
 - Never skip: short questions, greetings, code tasks — none are exempt.
 - This host has no automatic pre-prompt hook. YOU are the only retrieval trigger.
+- If `mnem_retrieve` errors or the server has no local repo configured, also
+  call `mnem_global_retrieve` as fallback.
+- Only call `mnem_global_retrieve` explicitly when the user says "global" or
+  local retrieval is unavailable.
 - If results surface, weave them into your answer naturally; never announce it.
 
 ## MANDATORY: Write memory after every turn with new facts
@@ -622,6 +641,10 @@ MEMORY.md indexes, or any other file-based notes — use mnem only.
 After EVERY turn where the user stated, corrected, or confirmed any fact,
 preference, event, entity, or goal — commit it SILENTLY without asking first.
 
+- **Local first**: use `mnem_commit`, `mnem_resolve_or_create`, and
+  `mnem_commit_relation` for all writes by default. Use `mnem_global_add` or
+  `mnem_global_ingest` only when the user explicitly says "global" or local
+  is unavailable.
 - One fact per node. Never merge two separate facts.
 - `summary` must be a complete standalone sentence (no leading pronouns).
 - Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
@@ -647,8 +670,9 @@ predicate is valid. Common: `works_at`, `lives_in`, `has_preference`,
 
 ## Forgetting
 
-User says "forget X": `mnem_global_retrieve` to find the node →
-`mnem_tombstone_node` with their wording as `reason`. Reply: "Removed."
+User says "forget X": `mnem_retrieve` to find the node (fall back to
+`mnem_global_retrieve` if not found locally) → `mnem_tombstone_node`
+with their wording as `reason`. Reply: "Removed."
 
 ## Supersession
 
@@ -657,11 +681,10 @@ edge from the old node to the new. The old fact stops surfacing automatically.
 
 ## CLI fallback (if MCP tools are unavailable)
 
-- **Read**: `mnem global retrieve "query text"`
-- **Write**: `mnem global add node -s "complete sentence" --label <type>`
-  where `<type>` is a free-form label (e.g. `Fact`, `Person`, `Event`)
-- **NEVER** use bare `mnem commit` or `mnem retrieve` — those use the
-  local repo store; facts will be invisible next session.
+- **Read**: `mnem retrieve "query text"` (local first). If that errors
+  (no .mnem in the current directory), use `mnem global retrieve "query text"`.
+- **Write**: `mnem commit` for local; `mnem global add node -s "..." --label <type>`
+  for global. Only use global when the user says "global" or no local .mnem exists.
 
 ## When NOT to commit
 
@@ -1662,7 +1685,10 @@ fn windows_hook_script_content(mnem_bin: &str) -> String {
         "# mnem UserPromptSubmit hook - auto-generated by `mnem integrate`\n\
          $json = $input | Out-String | ConvertFrom-Json\n\
          if ($json.prompt) {{\n\
-         \x20\x20& '{safe_bin}' global retrieve $json.prompt 2>$null\n\
+         \x20\x20& '{safe_bin}' retrieve $json.prompt 2>$null\n\
+         \x20\x20if ($LASTEXITCODE -ne 0) {{\n\
+         \x20\x20\x20\x20& '{safe_bin}' global retrieve $json.prompt 2>$null\n\
+         \x20\x20}}\n\
          }}\n"
     )
 }
@@ -1688,7 +1714,9 @@ fn pre_prompt_hook_command(_mnem_bin: &str) -> String {
         format!(
             "bash -c 'p=$(jq -r .prompt 2>/dev/null); \
              if [ -n \"$p\" ] && [ \"$p\" != \"null\" ]; then \
+             \"{}\" retrieve \"$p\" 2>/dev/null || \
              \"{}\" global retrieve \"$p\" 2>/dev/null; fi'",
+            _mnem_bin.replace('"', "\\\""),
             _mnem_bin.replace('"', "\\\"")
         )
     }

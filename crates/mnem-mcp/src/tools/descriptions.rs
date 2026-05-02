@@ -385,20 +385,17 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
         },
         ToolDef {
             name: "mnem_global_retrieve",
-            description: "Cross-repo semantic search. Searches every repo registered in \
-                          ~/.mnemglobal/repos.toml plus the global anchor graph itself \
-                          (~/.mnemglobal/.mnem/), deduplicates results by node UUID, and \
-                          returns them ranked by score with a [source] label. \
-                          Use this instead of mnem_retrieve when you want to recall facts \
-                          across all repos simultaneously - the preferred tool for reading \
-                          memory on every user turn.",
+            description: "Semantic search on the global anchor graph (~/.mnemglobal/.mnem/) only. \
+                          Always targets the global graph regardless of which repo the MCP server \
+                          is pointed at. Use this when you explicitly want to read from the shared \
+                          cross-session memory store. Use mnem_retrieve for the current local repo.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "text":         { "type": "string", "description": "Query text. Passed as BM25/rerank input and optionally auto-embedded when an embedder is configured." },
                     "vector":       {
                         "type": "object",
-                        "description": "Pre-computed query vector. Reused across all repos - compute once, pass here.",
+                        "description": "Pre-computed query vector.",
                         "properties": {
                             "model":  { "type": "string" },
                             "values": { "type": "array", "items": { "type": "number" } }
@@ -406,8 +403,33 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
                         "required": ["model", "values"],
                         "additionalProperties": false
                     },
-                    "limit":        { "type": "integer", "minimum": 1, "maximum": 1000, "default": 10, "description": "Max results per repo before dedup + merge sort." },
+                    "limit":        { "type": "integer", "minimum": 1, "maximum": 1000, "default": 10, "description": "Max results to return." },
                     "token_budget": { "type": "integer", "minimum": 1, "description": "Soft token cap on total rendered output." }
+                },
+                "additionalProperties": false
+            }),
+        },
+        ToolDef {
+            name: "mnem_global_ingest",
+            description: "Ingest a source as a Doc + Chunk + Entity subgraph directly into the \
+                          global anchor graph (~/.mnemglobal/.mnem/). Always targets the global \
+                          graph regardless of which repo the MCP server is pointed at. Accepts \
+                          EITHER {path: \"<file>\"} (server reads the file from disk) OR \
+                          {text: \"...\", source?: \"label\"} (caller has already buffered the \
+                          document). Same chunker options as mnem_ingest. Use this for documents \
+                          that should be queryable across all sessions and projects.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path":       { "type": "string", "description": "Absolute or relative path to the source file on the MCP server's filesystem. Mutually exclusive with `text`." },
+                    "text":       { "type": "string", "description": "Inline document body. Mutually exclusive with `path`." },
+                    "source":     { "type": "string", "description": "Cosmetic label for the `path:` field when ingesting via `text`. Defaults to 'inline-text'." },
+                    "ntype":      { "type": "string", "description": "Root Doc node label (default 'Doc').", "default": "Doc" },
+                    "chunker":    { "type": "string", "enum": ["auto", "paragraph", "recursive", "session"], "default": "auto" },
+                    "max_tokens": { "type": "integer", "minimum": 1, "maximum": 8192, "default": 512 },
+                    "overlap":    { "type": "integer", "minimum": 0, "maximum": 8192, "default": 32 },
+                    "agent_id":   { "type": "string", "description": "Commit author. Defaults to 'mnem mcp' when absent." },
+                    "message":    { "type": "string", "default": "mnem_mcp global_ingest" }
                 },
                 "additionalProperties": false
             }),

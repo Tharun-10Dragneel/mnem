@@ -26,12 +26,7 @@
 
 #![cfg(feature = "summarize")]
 
-use mnem_embed_providers::{OllamaConfig, OpenAiConfig, ProviderConfig as EmbedProviderConfig};
-// `OnnxConfig` is only constructed inside `bundled_embedder_default`'s
-// feature-gated branch; importing unconditionally would produce an
-// unused-import warning under default features.
-#[cfg(feature = "bundled-embedder")]
-use mnem_embed_providers::OnnxConfig;
+use mnem_embed_providers::{OllamaConfig, OnnxConfig, OpenAiConfig, ProviderConfig as EmbedProviderConfig};
 use serde::Deserialize;
 
 /// Default model picked when the `bundled-embedder` cargo feature
@@ -77,9 +72,10 @@ pub(crate) fn resolve_embed_cfg(repo_path: &std::path::Path) -> Option<EmbedProv
                     .unwrap_or_else(|_| "http://localhost:11434".into()),
                 timeout_secs: 30,
             })),
-            // `onnx` from env is not supported here: mirrors the
-            // CLI's behaviour. Set `embed.provider = "onnx"` in
-            // <repo>/config.toml or rely on the bundled tier.
+            "onnx" => Some(EmbedProviderConfig::Onnx(OnnxConfig {
+                model,
+                max_length: None,
+            })),
             _ => None,
         };
     }

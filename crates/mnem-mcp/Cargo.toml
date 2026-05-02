@@ -40,9 +40,11 @@ workspace = true
 # retriever only as rerank input). Implies `summarize` so the
 # embed-providers crate is in the dep tree.
 [features]
-default = ["summarize"]
+default = ["summarize", "bundled-embedder"]
 summarize = ["dep:mnem-embed-providers", "dep:mnem-graphrag"]
 bundled-embedder = ["summarize", "mnem-embed-providers/onnx-bundled"]
+bundled-embedder-cuda = ["bundled-embedder", "mnem-embed-providers/onnx-bundled-cuda"]
+bundled-embedder-directml = ["bundled-embedder", "mnem-embed-providers/onnx-bundled-directml"]
 
 [dependencies]
 mnem-core = { path = "../mnem-core", version = "=0.1.0" }

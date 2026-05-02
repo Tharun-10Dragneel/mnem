@@ -2,13 +2,12 @@ use super::*;
 
 use crate::{config, global, repo};
 
-/// `mnem global` subcommand - operations across all registered repos and the
-/// global anchor graph at `~/.mnemglobal/.mnem/`.
+/// `mnem global` subcommand - read and write the global anchor graph at
+/// `~/.mnemglobal/.mnem/` directly.
 #[derive(clap::Subcommand, Debug)]
 pub(crate) enum GlobalCmd {
-    /// Search ALL registered repos + the global graph simultaneously.
-    /// Results are merged, deduplicated by node UUID, and ranked by score.
-    /// Each result is labelled with its source repo path.
+    /// Search the global graph (~/.mnemglobal/.mnem/) only.
+    /// Results are ranked by score.
     #[command(after_long_help = "\
 Examples:
   mnem global retrieve \"Alice in Berlin\"
@@ -27,16 +26,24 @@ Examples:
     ///   mnem -R ~/notes add node --label Entity:Person --prop name=Alice --prop _global_anchor=<uuid>
     #[command(subcommand)]
     Add(super::add::AddCmd),
+
+    /// Ingest external source files (Markdown / text / PDF / chat JSON)
+    /// into the global graph (~/.mnemglobal/.mnem/) as a Doc + Chunk + Entity subgraph.
+    ///
+    /// Examples:
+    ///   mnem global ingest notes.md
+    ///   mnem global ingest --chunker recursive --max-tokens 1024 book.pdf
+    ///   mnem global ingest --recursive docs/
+    Ingest(super::ingest::Args),
 }
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct GlobalRetrieveArgs {
     /// Query text. Embedded with the configured provider and used for
-    /// semantic search across all repos.
+    /// semantic search on the global graph.
     #[arg(value_name = "QUERY")]
     pub query: Option<String>,
-    /// Max results per repo before merging (total may be up to N * repos).
-    /// Final output is truncated to N after cross-repo merge. Default: 10.
+    /// Max results to return. Default: 10.
     #[arg(long, short = 'n')]
     pub limit: Option<usize>,
     /// Skip semantic (vector) search. Useful when no embedder is configured.
@@ -58,6 +65,16 @@ pub(crate) fn run(_override: Option<&Path>, cmd: GlobalCmd) -> Result<()> {
             }
             super::add::run(Some(&global_dir), add_cmd)
         }
+        GlobalCmd::Ingest(ingest_args) => {
+            if !global_dir.join(repo::MNEM_DIR).is_dir() {
+                bail!(
+                    "Global graph not initialised at {}.\n\
+                     hint: run `mnem integrate` to create it.",
+                    global_dir.display()
+                );
+            }
+            super::ingest::run(Some(&global_dir), ingest_args)
+        }
     }
 }
 
@@ -65,7 +82,6 @@ struct Hit {
     score: f32,
     tokens: u32,
     node: mnem_core::objects::Node,
-    source: std::path::PathBuf,
 }
 
 fn cmd_retrieve(global_dir: &Path, args: GlobalRetrieveArgs) -> Result<()> {
@@ -75,98 +91,86 @@ fn cmd_retrieve(global_dir: &Path, args: GlobalRetrieveArgs) -> Result<()> {
     }
     let limit = args.limit.unwrap_or(10);
 
-    // --- build target list: global graph first, then registered repos ---
-    let mut targets: Vec<std::path::PathBuf> = Vec::new();
-    if global_dir.join(repo::MNEM_DIR).is_dir() {
-        targets.push(global_dir.to_path_buf());
-    }
-    if global_dir.exists() {
-        if let Ok(reg) = global::RepoRegistry::load(global_dir) {
-            for entry in reg.repos {
-                let candidate = entry.path.clone();
-                if candidate.join(repo::MNEM_DIR).is_dir() && !targets.contains(&candidate) {
-                    targets.push(candidate);
-                }
-            }
-        }
-    }
-    if targets.is_empty() {
+    let global_mnem = global_dir.join(repo::MNEM_DIR);
+    if !global_mnem.is_dir() {
         bail!(
-            "No repos to search.\n\
-             hint: run `mnem integrate` then `mnem init <path>` to register repos."
+            "Global graph not initialised at {}.\n\
+             hint: run `mnem integrate` to create it.",
+            global_dir.display()
         );
     }
 
-    // --- embed query once, using the first repo that has an embedder configured ---
+    // Embed using the global graph's embedder config.
     let opt_vec: Option<(String, Vec<f32>)> = if args.no_vector {
         None
     } else {
-        embed_query_once(&targets, &query)
-    };
-
-    // --- search each repo, collect hits ---
-    let mut all_hits: Vec<Hit> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for target in &targets {
-        let r = match repo::open_repo(Some(target.as_path())) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("(skipping {}: {e})", target.display());
-                continue;
-            }
-        };
-        let mut ret = r.retrieve().limit(limit).query_text(query.clone());
-        if let Some((model, vec)) = &opt_vec {
-            ret = ret.vector(model.clone(), vec.clone());
-        }
-        match ret.execute() {
-            Ok(result) => {
-                for item in result.items {
-                    let id = item.node.id.to_uuid_string();
-                    if seen.insert(id) {
-                        all_hits.push(Hit {
-                            score: item.score,
-                            tokens: item.tokens,
-                            node: item.node,
-                            source: target.clone(),
-                        });
+        let cfg = config::load(&global_mnem).ok();
+        let pc = cfg.as_ref().and_then(|c| config::resolve_embedder(c));
+        if let Some(pc) = pc {
+            match mnem_embed_providers::open(&pc) {
+                Ok(embedder) => match embedder.embed(&query) {
+                    Ok(v) => Some((embedder.model().to_string(), v)),
+                    Err(e) => {
+                        eprintln!("{}", format_embed_failure(&e, &pc, "query embedding"));
+                        None
                     }
+                },
+                Err(e) => {
+                    eprintln!("{}", format_embed_failure(&e, &pc, "query embedding"));
+                    None
                 }
             }
-            Err(e) => eprintln!("(error searching {}: {e})", target.display()),
+        } else {
+            None
         }
+    };
+
+    let r = repo::open_repo(Some(global_dir.as_ref()))?;
+    let mut ret = r.retrieve().limit(limit).query_text(query);
+    if let Some((model, vec)) = &opt_vec {
+        ret = ret.vector(model.clone(), vec.clone());
     }
 
-    if all_hits.is_empty() {
-        println!("No results found across {} repo(s).", targets.len());
+    let result = match ret.execute() {
+        Ok(res) => res,
+        Err(e) => {
+            let msg = format!("{e:#}");
+            if msg.contains("no filters or rankers configured") {
+                println!("No results found (global graph has no index configured).");
+                return Ok(());
+            }
+            return Err(e.into());
+        }
+    };
+
+    let mut hits: Vec<Hit> = result
+        .items
+        .into_iter()
+        .map(|item| Hit {
+            score: item.score,
+            tokens: item.tokens,
+            node: item.node,
+        })
+        .collect();
+
+    if hits.is_empty() {
+        println!("No results found in the global graph.");
         return Ok(());
     }
 
-    // sort by score desc, then truncate to limit
-    all_hits.sort_by(|a, b| {
+    hits.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    all_hits.truncate(limit);
+    hits.truncate(limit);
 
-    println!(
-        "Found {} result(s) across {} repo(s):\n",
-        all_hits.len(),
-        targets.len()
-    );
-    for (i, hit) in all_hits.iter().enumerate() {
-        let src = if hit.source == *global_dir {
-            "[global]".to_string()
-        } else {
-            format!("[{}]", hit.source.display())
-        };
+    println!("Found {} result(s) in the global graph:\n", hits.len());
+    for (i, hit) in hits.iter().enumerate() {
         println!(
-            "---\n[{i}] score={:.4} tokens={} {} id={} {}",
+            "---\n[{i}] score={:.4} tokens={} id={} {}",
             hit.score,
             hit.tokens,
-            src,
             hit.node.id.to_uuid_string(),
             hit.node.ntype,
         );
@@ -185,34 +189,4 @@ fn cmd_retrieve(global_dir: &Path, args: GlobalRetrieveArgs) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Try to embed `query` using the first repo in `targets` that has a working
-/// embedder configured. Returns `None` silently if none are configured or all
-/// fail (the caller proceeds with property-only retrieval).
-fn embed_query_once(
-    targets: &[std::path::PathBuf],
-    query: &str,
-) -> Option<(String, Vec<f32>)> {
-    for target in targets {
-        let data_dir = target.join(repo::MNEM_DIR);
-        let cfg = config::load(&data_dir).ok()?;
-        let Some(pc) = config::resolve_embedder(&cfg) else {
-            continue;
-        };
-        match mnem_embed_providers::open(&pc) {
-            Ok(embedder) => match embedder.embed(query) {
-                Ok(v) => return Some((embedder.model().to_string(), v)),
-                Err(e) => {
-                    eprintln!("{}", format_embed_failure(&e, &pc, "query embedding"));
-                    continue;
-                }
-            },
-            Err(e) => {
-                eprintln!("{}", format_embed_failure(&e, &pc, "query embedding"));
-                continue;
-            }
-        }
-    }
-    None
 }

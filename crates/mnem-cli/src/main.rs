@@ -188,8 +188,8 @@ Examples:
     /// Lists, sets the default, or prunes stale entries.
     #[command(subcommand)]
     Repos(commands::repos::ReposCmd),
-    /// Search all registered repos + the global graph, or write directly
-    /// to the global graph (~/.mnemglobal/.mnem/).
+    /// Read and write the global anchor graph (~/.mnemglobal/.mnem/) directly.
+    /// All subcommands operate exclusively on the global graph.
     #[command(subcommand)]
     Global(commands::global_cmd::GlobalCmd),
     /// Manage `[remote.<name>]` entries in `.mnem/config.toml`. Pure

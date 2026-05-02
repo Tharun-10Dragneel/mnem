@@ -1,17 +1,8 @@
-//! Handler for the `mnem_ingest` MCP tool.
+//! Handler for `mnem_global_ingest` - ingest source files into the global anchor graph.
 //!
-//! Phase-B5d, MCP half. Reads a file from disk, runs
-//! [`mnem_ingest::Ingester`] against a fresh transaction, commits
-//! with the caller-supplied `agent_id` as author, and renders a short
-//! plain-text summary the calling model can reason about.
-//!
-//! ## Why plain text, not JSON
-//!
-//! Matches every other handler in this module. MCP tool output is
-//! consumed by an LLM; `key: value` lines and indented counts
-//! tokenise about 30% smaller than an equivalent JSON blob, and the
-//! parse-free shape is a feature for the telemetry path described in
-//! `tools.rs`.
+//! Opens `~/.mnemglobal/.mnem/` and runs the standard ingest pipeline against it.
+//! Unlike `mnem_ingest` (which operates on whatever repo the MCP server is pointed at),
+//! this tool always targets the global graph regardless of server configuration.
 
 use std::path::PathBuf;
 
@@ -21,44 +12,23 @@ use serde_json::Value;
 
 use crate::server::Server;
 
-/// Upper bound on `max_tokens`. Mirrors the CLI and HTTP surface so a
-/// single request that migrates between transports sees one ceiling.
 const MAX_TOKENS_CAP: u32 = 8192;
-
-/// Upper bound on ingested file size for the MCP path. Matches the
-/// HTTP handler default (`MNEM_HTTP_INGEST_MAX_BYTES` in B5d-3). MCP
-/// callers run in-process with the agent but typically hand-roll
-/// arbitrary paths, so the same DoS guardrail applies.
 const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 
-// ============================================================
-// mnem_ingest
-// ============================================================
+pub(in crate::tools) fn global_ingest(_server: &mut Server, args: Value) -> Result<String> {
+    let global_data = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".mnemglobal")
+        .join(".mnem");
 
-/// Dispatch target for the `mnem_ingest` tool.
-///
-/// Accepts either:
-///   - `{path: "/abs/file"}` -- read the file from disk and chunk it.
-///   - `{text: "...", source?: "label"}` -- treat the inline string
-///     as the document body. `source` becomes the cosmetic
-///     `path:` field in the output (defaults to `inline-text`).
-///
-/// audit-2026-04-25 C3-8 (Cycle-3): Pass-2 found callers expecting
-/// the inline `{text, source}` shape (e.g. agent flows that have
-/// already buffered the document) hit "missing 'path'". The
-/// dispatcher accepts both shapes; an inline call short-circuits the
-/// filesystem stat / size cap path, so the `MAX_FILE_BYTES` ceiling
-/// is replaced by the same `text.len()` byte cap to keep the DoS
-/// guardrail uniform across both shapes.
-///
-/// # Errors
-///
-/// Returns an error when both `path` and `text` are missing, the
-/// file is absent / too large, the inline text is empty / over the
-/// cap, the pipeline rejects the payload, or the backing transaction
-/// fails to commit. Errors bubble back to the caller as tool-level
-/// errors (not JSON-RPC protocol errors).
-pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<String> {
+    if !global_data.is_dir() {
+        return Ok(
+            "mnem_global_ingest: global graph not found at ~/.mnemglobal/.mnem/. \
+             Run `mnem integrate` then `mnem init` to create it.\n"
+                .to_string(),
+        );
+    }
+
     let ntype = args
         .get("ntype")
         .and_then(Value::as_str)
@@ -93,12 +63,9 @@ pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<Strin
     let message = args
         .get("message")
         .and_then(Value::as_str)
-        .unwrap_or("mnem_mcp ingest")
+        .unwrap_or("mnem_mcp global_ingest")
         .to_string();
 
-    // C3-8: dispatch on shape. `path` wins when both are passed --
-    // it carries strictly more information (kind detection from
-    // extension, real on-disk path for provenance).
     let path_arg = args.get("path").and_then(Value::as_str);
     let text_arg = args.get("text").and_then(Value::as_str);
 
@@ -132,9 +99,6 @@ pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<Strin
                 .and_then(Value::as_str)
                 .unwrap_or("inline-text")
                 .to_string();
-            // Inline text has no file extension to drive
-            // `source_kind_for_path`; default to `Text` so the
-            // paragraph/recursive chunker chain still applies.
             let kind = SourceKind::Text;
             (source_label, t.as_bytes().to_vec(), kind)
         }
@@ -155,7 +119,7 @@ pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<Strin
     };
     let ing = Ingester::new(config);
 
-    let repo = server.load_repo()?;
+    let repo = Server::open_repo_at(&global_data)?;
     let mut tx = repo.start_transaction();
     let result = ing.ingest(&mut tx, &bytes, kind)?;
     let new_repo = tx.commit(&agent_id, &message)?;
@@ -165,14 +129,11 @@ pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<Strin
         .first()
         .map_or_else(|| "<none>".to_string(), ToString::to_string);
 
-    // Embed summaries of all newly committed nodes. Mirrors the CLI's
-    // post-ingest reindex step. Non-fatal: embedding failures are silent
-    // and the commit is already durable.
     #[cfg(feature = "summarize")]
-    let embed_count = embed_ingest_nodes(server.repo_path(), &new_repo, &agent_id);
+    let embed_count = embed_global_nodes(&global_data, &new_repo, &agent_id);
 
     let mut out = String::new();
-    out.push_str("mnem_ingest: ok\n");
+    out.push_str("mnem_global_ingest: ok\n");
     out.push_str(&format!("  path:           {display_path}\n"));
     out.push_str(&format!("  source_kind:    {kind:?}\n"));
     out.push_str(&format!("  op_id:          {}\n", new_repo.op_id()));
@@ -187,13 +148,9 @@ pub(in crate::tools) fn ingest(server: &mut Server, args: Value) -> Result<Strin
     Ok(out)
 }
 
-/// Walk all nodes in `repo`, embed any that have a summary but no vector
-/// for the resolved model, and commit the vectors in a second transaction.
-/// Non-fatal: returns 0 on any setup failure (no embedder, no commit,
-/// empty repo). Mirrors `mnem reindex` / CLI post-ingest embed pass.
 #[cfg(feature = "summarize")]
-fn embed_ingest_nodes(
-    repo_path: &std::path::Path,
+fn embed_global_nodes(
+    global_data: &std::path::Path,
     repo: &mnem_core::repo::ReadonlyRepo,
     agent_id: &str,
 ) -> usize {
@@ -202,7 +159,7 @@ fn embed_ingest_nodes(
     use mnem_core::objects::Node;
     use mnem_core::prolly::Cursor;
 
-    let Some(pc) = crate::tools::embed::resolve_embed_cfg(repo_path) else {
+    let Some(pc) = crate::tools::embed::resolve_embed_cfg(global_data) else {
         return 0;
     };
     let Ok(embedder) = mnem_embed_providers::open(&pc) else {
@@ -248,7 +205,8 @@ fn embed_ingest_nodes(
     }
 
     if count > 0 {
-        let opts = mnem_core::repo::CommitOptions::new(agent_id, "mnem_ingest: embed nodes");
+        let opts =
+            mnem_core::repo::CommitOptions::new(agent_id, "mnem_global_ingest: embed nodes");
         let _ = tx.commit_opts(opts);
     }
 

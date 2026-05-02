@@ -72,6 +72,7 @@ pub(crate) fn dispatch(server: &mut Server, name: &str, args: Value) -> Result<S
         "mnem_retrieve" => handlers::retrieve::retrieve(server, args),
         "mnem_global_retrieve" => handlers::global_retrieve::global_retrieve(server, args),
         "mnem_global_add" => handlers::global_add::global_add(server, args),
+        "mnem_global_ingest" => handlers::global_ingest::global_ingest(server, args),
         "mnem_ingest" => handlers::ingest::ingest(server, args),
         #[cfg(feature = "summarize")]
         "mnem_community_summarize" => {

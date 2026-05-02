@@ -6,6 +6,7 @@
 pub(super) mod commit;
 pub(super) mod commit_relation;
 pub(super) mod global_add;
+pub(super) mod global_ingest;
 pub(super) mod global_retrieve;
 #[cfg(feature = "summarize")]
 pub(super) mod community_summarize;

@@ -729,6 +729,10 @@ pub(crate) fn resolve_embedder(cfg: &Config) -> Option<ProviderConfig> {
                     .unwrap_or_else(|_| "http://localhost:11434".into()),
                 timeout_secs: 30,
             })),
+            "onnx" => Some(ProviderConfig::Onnx(OnnxConfig {
+                model,
+                max_length: None,
+            })),
             _ => None,
         };
     }

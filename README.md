@@ -4,9 +4,7 @@
 
 # mnem
 
-**Git for knowledge graphs.** Versioned, mergeable agent memory with
-hybrid GraphRAG retrieval. Embed in Rust or Python, run the CLI, or plug
-into any MCP client. Local-first. Apache-2.0.
+**Git for Knowledge Graphs**: versioned agent memory with hybrid GraphRAG retrieval. Runs entirely offline, no LLM required.
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat)](LICENSE)
 [![CI](https://github.com/Uranid/mnem/actions/workflows/ci.yml/badge.svg)](https://github.com/Uranid/mnem/actions/workflows/ci.yml)
@@ -21,141 +19,65 @@ into any MCP client. Local-first. Apache-2.0.
 
 ## What it is
 
-mnem is a versioned, content-addressed knowledge graph for AI agent
-memory. Think Git, but the diff is over a graph and the merge is over
-embeddings. Every fact has a cryptographic identity, every retrieve
-fuses vector + sparse + graph signals, and every response tells you
-exactly what got dropped at your token budget.
+**A content-addressed knowledge graph with hybrid GraphRAG retrieval, versioned commits, and deterministic ingest, built as a persistent memory substrate for AI agents.**
 
----
+Every node carries a cryptographic identity derived from DAG-CBOR + BLAKE3: the same content produces the same CID on any machine. Retrieval fuses vector (HNSW), sparse (BM25/SPLADE), and multi-hop graph traversal via RRF in a single pass, and every response reports exactly what candidates were seen and what got dropped at your token budget. Ingest is LLM-free. Single binary. No cloud. Compiles to `wasm32`.
 
-## Quickstart
+## What you get
 
-```bash
-cargo install --locked mnem-cli --features bundled-embedder
+**mnem is strongest when:**
+- facts accumulate across many sessions and you need to reason over history
+- queries require multi-hop traversal ("how does X relate to Y")
+- ingest must be deterministic and auditable - same bytes, same CIDs
+- deployment is edge, offline, or WASM (no network, no daemon required)
+- multiple agents write independently and need to merge without conflicts
 
-mkdir my-graph && cd my-graph
-mnem init
-mnem ingest README.md
-mnem retrieve "what does this project do" --top-k 5
-```
+| | Meaning |
+|:--:|:--------|
+| <img src="assets/legend/unique.svg" width="18" height="18" alt="unique"> | **unique** - not available in any other agent-memory system today |
+| <img src="assets/legend/rare.svg" width="18" height="18" alt="rare"> | **rare** - available in 1-2 peers, often gated behind paid tiers |
+| - | standard capability, done well |
 
-`--features bundled-embedder` ships the in-process ONNX MiniLM-L6-v2
-so `mnem retrieve` works zero-config. Drop the flag if you want to
-configure your own embedder (Ollama / OpenAI / Cohere) via
-`.mnem/config.toml`. GPU-accelerated variants
-(`bundled-embedder-cuda`, `bundled-embedder-directml`) live under
-[Install](#install).
+1. <img src="assets/legend/unique.svg" width="14" height="14" alt="unique"> **Versioned + 3-way mergeable**. Commits, branches, diff, log, three-way merge, signed Ed25519 history. Two agents writing the same scope offline reconcile by graph + embedding merge, not "last write wins". → [Core concepts](docs/src/core-concepts.md)
 
-Five minutes from zero. See [`docs/src/quickstart.md`](docs/src/quickstart.md) for the longer walkthrough,
-or jump to [Install](#install) for your platform.
+2. <img src="assets/legend/unique.svg" width="14" height="14" alt="unique"> **Content-addressed objects**. Every node / tree / sidecar / commit has a CID derived from canonical DAG-CBOR + BLAKE3. Identical content collapses across machines. Determinism + replay become real, not a slogan. Peers use opaque UUIDs. → [Core concepts](docs/src/core-concepts.md)
 
----
+3. <img src="assets/legend/unique.svg" width="14" height="14" alt="unique"> **Token-budget transparency**. Every retrieve emits `tokens_used`, `candidates_seen`, `dropped` counters. No silent truncation. No other agent-memory system exposes this as first-class response fields. → [Observability](docs/src/architecture/retrieval.md)
 
-## `mnem integrate` — wire into any agent host
+4. <img src="assets/legend/unique.svg" width="14" height="14" alt="unique"> **WASM-clean core**. `mnem-core` has no tokio, no filesystem, no network. Same retrieval logic compiles unchanged to `wasm32` - runs in Chrome, on Cloudflare Workers, on Lambda cold-start. Graphiti + mem0 are Python + external DB stacks; they cannot ship to the edge. → [Architecture overview](docs/src/architecture/overview.md)
 
-```bash
-mnem integrate                    # interactive: detect + prompt
-mnem integrate --all              # wire every detected host, no prompts
-mnem integrate claude-code        # wire one specific host
-mnem integrate --check            # report wired state, no writes
-mnem integrate --dry-run          # diff what would change, no writes
-mnem integrate --no-hooks         # skip hook wiring
-mnem integrate --no-system-prompt # skip system-prompt wiring
-```
+5. <img src="assets/legend/unique.svg" width="14" height="14" alt="unique"> **Skills as graphs, not markdown**. Today, agent skills live in flat `.md` files - downloaded, pasted into prompts, hand-edited, never queried. mnem promotes them to a versioned, queryable, mergeable graph. Export your graph, import someone else's, diff the two, merge the parts you want. → [Agent memory guide](docs/src/guides/agent-memory.md)
 
-One command wires **MCP server entry**, **UserPromptSubmit hook**
-(for hosts that support it), and the **mnem system prompt** into the
-host's project-rules file — all in one shot. Restart the host. Done.
+6. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Best-in-class retrieval recall**. Beats open-source peers on LoCoMo (+0.218 R@5), ConvoMem (+0.047), and MemBench (+0.120) under the same embedder; matches MemPalace on LongMemEval (R@5 0.966). Numbers reproducible with the shipped harness. → [Benchmarks](benchmarks/README.md)
 
-Auto-detects and configures: **Claude Code**, **Claude Desktop**,
-**Cursor**, **Continue**, **Zed**, **Gemini CLI**. Any other MCP-aware
-host works via a hand-edited `mcpServers` entry pointing at
-`mnem mcp --repo <path>` (see [`docs/src/mcp.md`](docs/src/mcp.md)).
+7. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Plug-and-play**. Bundled ONNX MiniLM-L6-v2 runs in-process. No Ollama, no API keys, no cold-start network call. `mnem init` and you're retrieving. mem0 + Graphiti both require an external LLM endpoint at ingest. → [Install](docs/src/install.md)
 
-To undo:
+8. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Single binary**. ~40 MB Docker image. Embedded redb store. No daemon, no cloud, no account. Runs offline. → [Architecture overview](docs/src/architecture/overview.md)
 
-```bash
-mnem unintegrate                  # interactive: pick hosts to remove
-mnem unintegrate claude-code      # remove one host
-mnem unintegrate --all            # remove all wired hosts
-```
+9. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Deterministic ingest**. No LLM at ingest. parse + chunk + extract is statistical (KeyBERT optional), so same bytes in produces same CIDs out. Audit-friendly, fuzz-tested, byte-identical across machines. → [Ingest pipeline](docs/src/guides/ingest.md)
 
-The agent gets `mnem_retrieve`, `mnem_commit`, `mnem_resolve_or_create`,
-`mnem_global_retrieve`, `mnem_global_add`, `mnem_tombstone_node`,
-`mnem_traverse`, `mnem_stats` (and more) as native tools.
-No extra daemon, no port to manage.
+10. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Swappable providers**. Embedder, sparse encoder, reranker, and LLM all set via config strings. Switch local ONNX to hosted Cohere with one flag. No fork, no rebuild. Most peers ship single-path stacks; provider swap is architectural here. → [Embedding providers](docs/src/guides/embed-providers.md)
 
----
+11. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Four surfaces, one core**. CLI, HTTP, MCP, and Python all wrap the same engine. `mnem integrate` wires the MCP server into Claude Desktop and other hosts. → [CLI reference](docs/src/cli.md) | [MCP](docs/src/mcp.md)
 
-## Commands
+12. <img src="assets/legend/rare.svg" width="14" height="14" alt="rare"> **Property + fuzz tests**. Parsers are property-tested + fuzz-harnessed; CAR round-trip and merge-commit are byte-identical. Trust signal usually only seen at the infra-DB tier.
 
-### Setup
-
-| Command | What it does |
-|---------|-------------|
-| `mnem init` | create a new graph in the current directory |
-| `mnem integrate` | wire MCP + hooks + system prompt into detected agent hosts |
-| `mnem integrate --all` | wire all detected hosts, no prompts |
-| `mnem integrate --check` | report wired state; non-mutating |
-| `mnem integrate --dry-run` | diff what would change; write nothing |
-| `mnem integrate --no-hooks` | skip hook wiring |
-| `mnem integrate --no-system-prompt` | skip system-prompt wiring |
-| `mnem integrate --show <host>` | print the JSON config snippet for a host |
-| `mnem unintegrate` | interactive: remove mnem wiring from selected hosts |
-| `mnem unintegrate <host>` | remove one host |
-| `mnem unintegrate --all` | remove all wired hosts |
-| `mnem doctor` | probe embedder + store + config; first-run sanity check |
-
-### Knowledge graph
-
-| Command | What it does |
-|---------|-------------|
-| `mnem ingest <file>` | add nodes from a file (md / pdf / chat-json) |
-| `mnem retrieve <query>` | hybrid retrieval (vector + sparse + graph) |
-| `mnem global retrieve <query>` | cross-repo semantic search across all registered graphs |
-| `mnem global add` | write nodes/edges directly to the global shared graph |
-| `mnem stats` | nodes, edges, refs, embedder health, repo size |
-| `mnem log` / `diff` / `branch` / `merge` | git-style history ops over the graph |
-| `mnem ref` / `cat-file` / `blame` | inspect refs and individual objects |
-| `mnem export` / `import` | CAR archives for ship-and-load |
-
-### Servers
-
-| Command | What it does |
-|---------|-------------|
-| `mnem mcp [--repo <path>]` | MCP JSON-RPC server over stdio |
-| `mnem http serve` | HTTP JSON API server (loopback by default) |
-
-Full reference: [`docs/src/cli.md`](docs/src/cli.md).
+13. **Hybrid GraphRAG retrieval**. Vector (HNSW) + sparse (BM25 / SPLADE) + graph traversal, fused via RRF. GraphRAG built in and optional: on for multi-hop, off when dense saturates. → [Retrieval architecture](docs/src/architecture/retrieval.md)
 
 ---
 
 ## Install
 
-> The `bundled-embedder` Cargo feature ships the in-process ONNX
-> MiniLM-L6-v2 (no Ollama, no API keys). Recommended for first-run.
-> Drop the flag to leave embedder configuration to your own
-> `.mnem/config.toml` (`provider = ollama|openai|cohere|...`).
+> [!NOTE]
+> `--features bundled-embedder` ships an in-process ONNX MiniLM-L6-v2 so `mnem retrieve` works with zero configuration. Omit the flag if you want to bring your own embedder (Ollama, OpenAI, Cohere) via `.mnem/config.toml`.
 
 <details>
-<summary><b>macOS</b></summary>
+<summary><b>macOS / Linux</b></summary>
 
 ```bash
-# Recommended: Cargo with bundled embedder
-cargo install --locked mnem-cli --features bundled-embedder
-```
-
-</details>
-
-<details>
-<summary><b>Linux</b></summary>
-
-```bash
-# Cargo with bundled embedder
 cargo install --locked mnem-cli --features bundled-embedder
 
-# CUDA-accelerated embedder (NVIDIA GPU)
+# CUDA-accelerated embedder (Linux, NVIDIA GPU)
 cargo install --locked mnem-cli --features bundled-embedder-cuda
 ```
 
@@ -165,7 +87,6 @@ cargo install --locked mnem-cli --features bundled-embedder-cuda
 <summary><b>Windows</b></summary>
 
 ```powershell
-# Recommended: Cargo with bundled embedder
 cargo install --locked mnem-cli --features bundled-embedder
 
 # DirectML-accelerated embedder (any GPU vendor on Windows)
@@ -182,9 +103,7 @@ pip install mnem-cli
 mnem --version
 ```
 
-Ships the `mnem` binary as a manylinux / macOS / Windows wheel with
-the bundled embedder pre-baked. No Cargo feature flag needed; the
-PyPI build always includes it.
+Ships the `mnem` binary as a manylinux / macOS / Windows wheel with the bundled embedder pre-baked.
 
 </details>
 
@@ -195,8 +114,7 @@ PyPI build always includes it.
 docker run --rm -p 9876:9876 ghcr.io/uranid/mnem:latest http serve
 ```
 
-The image is built with `FEATURES=onnx`; the bundled embedder
-is always present in Docker. Run `mnem mcp` inside the container for the MCP server surface.
+The image includes the bundled embedder. Run `mnem mcp` inside the container for the MCP server surface.
 
 </details>
 
@@ -206,90 +124,176 @@ is always present in Docker. Run `mnem mcp` inside the container for the MCP ser
 ```bash
 git clone https://github.com/Uranid/mnem
 cd mnem
-
-# Install to ~/.cargo/bin/mnem (globally callable, recommended)
 cargo install --path crates/mnem-cli --features bundled-embedder
-
-# Shorthand aliases (same thing, from anywhere in the repo):
-cargo install-mnem          # all platforms
-make install                # Linux / macOS only
-
-# Re-run any of the above after pulling changes to update the global binary.
-
-# Without bundled embedder (bring your own via .mnem/config.toml)
-cargo install --path crates/mnem-cli
-
-mnem --version
 ```
 
 Requires Rust 1.95+. If needed: `rustup install 1.95 && rustup default 1.95`.
 
 </details>
 
-<details>
-<summary><b>WASM (in-browser)</b></summary>
-
-```bash
-cargo build --release --target wasm32-unknown-unknown -p mnem-core
-```
-
-`mnem-core` has no tokio, no filesystem, no network. Same retrieval
-logic runs unchanged in browsers and edge workers. The bundled
-embedder is NOT WASM-compatible (ort uses native libs); supply
-embeddings from the host.
-
-</details>
-
-### Verify
-
 ```bash
 mnem --version
-mnem doctor
+mnem doctor        # checks embedder + store + config, prints a green/yellow/red checklist
 ```
 
-`mnem doctor` probes embedder + store + config and prints a
-green/yellow/red checklist. Useful first command after install.
+Full install matrix: [`docs/src/install.md`](docs/src/install.md).
 
 ---
 
-## What you get
+## Quickstart
 
-Legend: $\color{gold}{\textbf{(unique)}}$ = mnem-original; not shipping
-in any other agent-memory system today. $\color{orange}{\textbf{(rare)}}$
-= exists in 1-2 peers, often gated behind paid tiers.
-$\color{gray}{\textbf{(standard)}}$ = table-stakes done well.
+```bash
+mkdir my-graph && cd my-graph
+mnem init
+mnem ingest README.md
+mnem retrieve "what does this project do"
+```
 
-1. **Plug-and-play** $\color{orange}{\textbf{(rare)}}$. Bundled ONNX MiniLM-L6-v2 runs in-process. No Ollama, no API keys, no cold-start network call. `mnem init` and you're retrieving. mem0 + Graphiti both require an external LLM endpoint at ingest. → [Install](docs/src/install.md)
+Five minutes from zero. See [`docs/src/quickstart.md`](docs/src/quickstart.md) for the full walkthrough.
 
-2. **Swappable providers** $\color{orange}{\textbf{(rare)}}$. Embedder, sparse encoder, reranker, and LLM all set via config strings. Switch local ONNX to hosted Cohere with one flag. No fork, no rebuild. Most peers ship single-path stacks; provider swap is architectural here. → [Embedding providers](docs/src/guides/embed-providers.md)
+---
 
-3. **Hybrid GraphRAG retrieval** $\color{gray}{\textbf{(standard, done well)}}$. Vector (HNSW) + sparse (BM25 / SPLADE) + graph traversal, fused via RRF. GraphRAG built in and optional → on for multi-hop, off when dense saturates. → [Retrieval architecture](docs/src/architecture/retrieval.md)
+## `mnem integrate` - wire into any agent host
 
-4. **Token-budget transparency** $\color{gold}{\textbf{(unique)}}$. Every retrieve emits `tokens_used`, `candidates_seen`, `dropped` counters. No silent truncation. **No other agent-memory system exposes this** as first-class response fields. → [Observability](docs/src/architecture/retrieval.md)
+One command wires the **MCP server entry**, the **UserPromptSubmit hook** (for hosts that support it), and the **mnem system prompt** into the host's project-rules file. Restart the host and the agent starts using mnem automatically.
 
-5. **Content-addressed objects** $\color{gold}{\textbf{(unique)}}$. Every node / tree / sidecar / commit has a CID derived from canonical DAG-CBOR + BLAKE3. Identical content collapses across machines. Determinism + replay become real, not a slogan. Peers use opaque UUIDs. → [Core concepts](docs/src/core-concepts.md)
+```bash
+mnem integrate                  # interactive: detect installed hosts and prompt
+mnem integrate claude-code      # wire a specific host directly
+mnem integrate --all            # wire every detected host without prompting
+```
 
-6. **Versioned + 3-way mergeable** $\color{gold}{\textbf{(unique)}}$. Commits, branches, diff, log, **three-way merge**, signed Ed25519 history. Two agents writing the same scope offline reconcile by graph + embedding merge → not "last write wins". → [Core concepts](docs/src/core-concepts.md)
+> [!TIP]
+> Run `mnem integrate --help` for all options including `--dry-run`, `--no-hooks`, `--no-system-prompt`, `--check`, and `--show <host>`.
 
-7. **Deterministic ingest** $\color{orange}{\textbf{(rare)}}$. No LLM at ingest. parse + chunk + extract is statistical (KeyBERT optional), so same bytes in → same CIDs out. Audit-friendly, fuzz-tested, byte-identical across machines. → [Ingest pipeline](docs/src/guides/ingest.md)
+Auto-detects and configures:
+- Claude Code
+- Claude Desktop
+- Cursor
+- Continue
+- Zed
+- Gemini CLI
 
-8. **Reproducible benchmarks** $\color{orange}{\textbf{(rare)}}$. Matches MemPalace on LongMemEval (R@5 0.966), +0.218 R@5 on LoCoMo, +0.047 on ConvoMem, +0.120 on MemBench under the same embedder. Numbers ship with the harness. → [Benchmarks](benchmarks/README.md)
+Any other MCP-aware host works via a hand-edited `mcpServers` entry pointing at `mnem mcp --repo <path>` - see [`docs/src/mcp.md`](docs/src/mcp.md).
 
-9. **Single binary** $\color{orange}{\textbf{(rare)}}$. ~40 MB Docker image. Embedded redb store. No daemon, no cloud, no account. Runs offline. → [Architecture overview](docs/src/architecture/overview.md)
+The agent gets the full mnem toolset as native tools: retrieve, commit, ingest, tombstone, traverse, global graph access, and more. No extra daemon, no port to manage. Full tool reference: [`docs/src/mcp.md`](docs/src/mcp.md).
 
-10. **WASM-clean core** $\color{gold}{\textbf{(unique among peers)}}$. `mnem-core` has no tokio, no filesystem, no network. Same retrieval logic compiles unchanged to `wasm32` → runs in Chrome, on Cloudflare Workers, on Lambda cold-start. Graphiti + mem0 are Python + external DB stacks; they cannot ship to the edge. → [Architecture overview](docs/src/architecture/overview.md)
+---
 
-11. **Four surfaces, one core** $\color{orange}{\textbf{(rare)}}$. CLI, HTTP, MCP, and Python all wrap the same Rust engine. `mnem integrate` wires the MCP server into Claude Desktop and other hosts. → [CLI reference](docs/src/cli.md) | [MCP](docs/src/mcp.md)
+## Commands
 
-12. **Skills as graphs, not markdown** $\color{gold}{\textbf{(unique angle)}}$. Today, agent skills live in flat `.md` files → downloaded, pasted into prompts, hand-edited, never queried. mnem promotes them to a versioned, queryable, mergeable graph. Export your graph, import someone else's, diff the two, merge the parts you want. → [Agent memory guide](docs/src/guides/agent-memory.md)
+Every command accepts `--help` for the full flag reference.
 
-13. **Property + fuzz tests** $\color{orange}{\textbf{(rare)}}$. Parsers are property-tested + fuzz-harnessed; CAR round-trip and merge-commit are byte-identical. Trust signal usually only seen at the infra-DB tier.
+### Init and health
+
+```bash
+mnem init      # create a new graph in the current directory
+mnem doctor    # probe embedder + store + config; green/yellow/red checklist
+mnem stats     # nodes, edges, refs, embedder health, repo size
+```
+
+### Adding knowledge
+
+```bash
+mnem ingest notes.md                        # parse a file into Doc + Chunk + Entity nodes
+mnem ingest --recursive docs/               # ingest a directory recursively
+mnem ingest --chunker recursive report.pdf  # PDF with sliding-window chunking
+```
+
+```bash
+mnem add node -s "Alice leads the infra team"                       # label defaults to "Node"
+mnem add node --label Fact -s "Alice leads the infra team"          # add a single fact node
+mnem add edge --from <uuid> --to <uuid> --label works_at            # connect two nodes
+```
+
+> The ingest pipeline is deterministic: no LLM at ingest time, same bytes in always produce the same CIDs out. Audit-friendly and fuzz-tested.
+
+### Retrieving knowledge
+
+```bash
+mnem retrieve "what did we decide about the API design"
+```
+
+Hybrid retrieval: vector (HNSW) + sparse (BM25/SPLADE) + graph traversal, fused via RRF. See [GraphRAG](#graphrag) for tuning flags.
+
+### The global graph
+
+> [!NOTE]
+> mnem has two scopes: the **local graph** (`.mnem/` in your project directory) and the **global graph** (`~/.mnemglobal/.mnem/`). The global graph is for cross-project, cross-session facts that should follow you everywhere.
+
+**When to use local vs global:**
+
+| Use local `.mnem/` for | Use `mnem global` for |
+|------------------------|----------------------|
+| Project-specific facts, decisions, code context | People, preferences, facts that span all projects |
+| Per-repo memory that travels with the repo | Knowledge you want every session and every agent to see |
+| Anything you'd commit alongside the code | Cross-session continuity |
+
+`mnem global` is a full mirror of `mnem` but operates exclusively on the global graph:
+
+```bash
+mnem global retrieve "what is Alice's current role"     # search the global graph only
+mnem global ingest contacts.md                          # ingest a file into the global graph
+mnem global add node --label Entity:Person \
+  --prop name=Alice -s "Alice leads the infra team"     # add a node to the global graph
+```
+
+The `mnem integrate` command sets up the agent to read local first and fall back to global automatically - no manual switching required during normal use.
+
+### History and branching
+
+```bash
+mnem log              # commit history
+mnem diff             # what changed between commits
+mnem branch           # list branches
+mnem branch create feature-x    # create a new branch
+mnem merge <branch>   # three-way merge (graph + embedding merge, not last-write-wins)
+```
+
+### Inspect and explore
+
+```bash
+mnem query --where name=Alice                  # exact property match
+mnem query --where kind=Person --with-outgoing knows  # match + follow edges
+
+mnem ref              # list refs
+mnem cat-file <cid>   # show a raw object
+mnem blame <node-id>  # which commit introduced a node
+```
+
+### Export, import, and servers
+
+```bash
+mnem export > graph.car        # dump the graph as a CAR archive
+mnem import graph.car          # load a CAR archive into the current graph
+
+mnem mcp                       # start the MCP JSON-RPC server over stdio
+mnem mcp --repo ~/notes        # point the MCP server at a specific graph
+mnem http serve                # start the HTTP JSON API (loopback by default)
+```
+
+### Benchmarks
+
+```bash
+mnem bench                                       # interactive TUI; select benchmarks to run
+mnem bench run --benches longmemeval --limit 50  # run a specific benchmark
+mnem bench fetch longmemeval                     # download benchmark datasets
+mnem bench results ./bench-out                   # re-render results from a prior run
+```
+
+```bash
+mnem completions bash   # emit bash completion script (pipe into your shell rc)
+mnem completions zsh    # zsh
+mnem completions fish   # fish
+```
+
+Full CLI reference: [`docs/src/cli.md`](docs/src/cli.md).
+
+---
 
 ## GraphRAG
 
-mnem ships GraphRAG built in. One knob per stage, opt-in per query,
-never required. Dense retrieval saturates first; turn graph stages on
-when multi-hop, cross-document, or compositional queries surface.
+mnem ships GraphRAG built in. One knob per stage, opt-in per query, never required. Vector search alone handles most queries well - turn graph stages on when queries span multiple documents, require multi-hop reasoning, or need compositional answers.
 
 ### Stages and flags
 
@@ -311,8 +315,8 @@ when multi-hop, cross-document, or compositional queries surface.
 ### Quick examples
 
 ```bash
-# Dense baseline (no graph, no fancy stuff)
-mnem retrieve "what does this project do" --top-k 5
+# Dense baseline
+mnem retrieve "what does this project do"
 
 # Add multi-hop graph traversal
 mnem retrieve "..." --graph-expand 20
@@ -325,21 +329,20 @@ mnem retrieve "..." --graph-expand 20 --community-filter --rerank cohere:rerank-
 
 # Per-user scoping
 mnem retrieve "..." --label user-42 --graph-expand 20
-
-# Hybrid v4 boost (bench harness; mirrors MemPalace harness helper)
-mnem retrieve "..." --hybrid-v4-boost
 ```
 
 ### When to enable
 
-- **Single-document corpus, simple queries** → leave graph off, dense saturates
-- **Multi-hop / compositional questions** → `--graph-expand 20`
-- **Long history with cross-document references** → add `--community-filter`
-- **Recall ceiling needed** → stack `--rerank` on top
-- **Multi-tenant agent memory** → always `--label <tenant>`
+- **Single-document corpus, simple queries**: leave graph off, vector search alone is enough
+- **Multi-hop / compositional questions**: `--graph-expand 20`
+- **Long history with cross-document references**: add `--community-filter`
+- **Recall ceiling needed**: stack `--rerank` on top
+- **Multi-tenant agent memory**: always `--label <tenant>`
 
-→ Full retrieval architecture: [`docs/src/architecture/retrieval.md`](docs/src/architecture/retrieval.md)
-→ Tuning playbook: [`docs/src/guides/retrieval-tuning.md`](docs/src/guides/retrieval-tuning.md)
+Full retrieval architecture: [`docs/src/architecture/retrieval.md`](docs/src/architecture/retrieval.md)
+Tuning playbook: [`docs/src/guides/retrieval-tuning.md`](docs/src/guides/retrieval-tuning.md)
+
+---
 
 ## Benchmarks
 
@@ -355,16 +358,16 @@ MemPalace's harness helper. Reproduce: `bash benchmarks/harness/run_bench.sh`.
 > dataset hashes. Both columns are reproducible; raw artefacts in
 > [`benchmarks/proofs/v0.1.0/`](benchmarks/proofs/v0.1.0/).
 
-| Benchmark | Split | Metric | MP | mnem 0.1.0 | Δ |
-|-----------|-------|--------|----|-----------|---|
-| LongMemEval | 500 Q | R@5 session | 0.966 | $\color{lightgreen}{\textbf{0.966}}$ | ±0 |
-| LongMemEval | 500 Q | R@10 session | 0.982 | $\color{lightgreen}{\textbf{0.982}}$ | ±0 |
-| LoCoMo | 1986 Q | R@5 session | 0.508 | $\color{lightgreen}{\textbf{0.726}}$ | **+0.218** |
-| LoCoMo | 1986 Q | R@10 session | 0.603 | $\color{lightgreen}{\textbf{0.855}}$ | **+0.252** |
-| ConvoMem | 250 (5x50) | avg recall | 0.929 | $\color{lightgreen}{\textbf{0.976}}$ | **+0.047** |
-| MemBench | simple/roles 100 | R@5 | 0.840 | $\color{lightgreen}{\textbf{0.960}}$ | **+0.120** |
-| MemBench | highlevel/movie 100 | R@5 | 0.950 | $\color{lightgreen}{\textbf{1.000}}$ | **+0.050** |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | $\color{salmon}{0.976}$ | -0.006 |
+| Benchmark | Split | Metric | MP | mnem 0.1.0 | Delta |
+|-----------|-------|--------|----|-----------|-------|
+| LongMemEval | 500 Q | R@5 session | 0.966 | **0.966** | 0 |
+| LongMemEval | 500 Q | R@10 session | 0.982 | **0.982** | 0 |
+| LoCoMo | 1986 Q | R@5 session | 0.508 | <font color="green">**0.726**</font> | **+0.218** |
+| LoCoMo | 1986 Q | R@10 session | 0.603 | <font color="green">**0.855**</font> | **+0.252** |
+| ConvoMem | 250 (5x50) | avg recall | 0.929 | <font color="green">**0.976**</font> | **+0.047** |
+| MemBench | simple/roles 100 | R@5 | 0.840 | <font color="green">**0.960**</font> | **+0.120** |
+| MemBench | highlevel/movie 100 | R@5 | 0.950 | <font color="green">**1.000**</font> | **+0.050** |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | <font color="red">0.976</font> | -0.006 |
 
 ### vs mem0
 
@@ -376,16 +379,16 @@ MemPalace's harness helper. Reproduce: `bash benchmarks/harness/run_bench.sh`.
 > Both columns reproducible; raw artefacts in
 > [`benchmarks/proofs/v0.1.0/`](benchmarks/proofs/v0.1.0/).
 
-| Benchmark | Split | Metric | mem0 | mnem 0.1.0 | Δ |
-|-----------|-------|--------|------|-----------|---|
-| LongMemEval | 500 Q | R@5 session | 0.946 | $\color{lightgreen}{\textbf{0.966}}$ | **+0.020** |
-| LongMemEval | 500 Q | R@10 session | 0.962 | $\color{lightgreen}{\textbf{0.982}}$ | **+0.020** |
-| LoCoMo | 1986 Q | R@5 session | 0.466 | $\color{lightgreen}{\textbf{0.726}}$ | **+0.260** |
-| LoCoMo | 1986 Q | R@10 session | 0.676 | $\color{lightgreen}{\textbf{0.855}}$ | **+0.179** |
-| ConvoMem | 250 (5x50) | avg recall | 0.558 | $\color{lightgreen}{\textbf{0.976}}$ | **+0.418** |
-| MemBench | simple/roles 100 | R@5 | 0.410 | $\color{lightgreen}{\textbf{0.960}}$ | **+0.550** |
-| MemBench | highlevel/movie 100 | R@5 | 0.970 | $\color{lightgreen}{\textbf{1.000}}$ | **+0.030** |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.930 | $\color{lightgreen}{\textbf{0.976}}$ | **+0.046** |
+| Benchmark | Split | Metric | mem0 | mnem 0.1.0 | Delta |
+|-----------|-------|--------|------|-----------|-------|
+| LongMemEval | 500 Q | R@5 session | 0.946 | <font color="green">**0.966**</font> | **+0.020** |
+| LongMemEval | 500 Q | R@10 session | 0.962 | <font color="green">**0.982**</font> | **+0.020** |
+| LoCoMo | 1986 Q | R@5 session | 0.466 | <font color="green">**0.726**</font> | **+0.260** |
+| LoCoMo | 1986 Q | R@10 session | 0.676 | <font color="green">**0.855**</font> | **+0.179** |
+| ConvoMem | 250 (5x50) | avg recall | 0.558 | <font color="green">**0.976**</font> | **+0.418** |
+| MemBench | simple/roles 100 | R@5 | 0.410 | <font color="green">**0.960**</font> | **+0.550** |
+| MemBench | highlevel/movie 100 | R@5 | 0.970 | <font color="green">**1.000**</font> | **+0.030** |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.930 | <font color="green">**0.976**</font> | **+0.046** |
 
 ### Latency
 
@@ -403,34 +406,18 @@ MemPalace's harness helper. Reproduce: `bash benchmarks/harness/run_bench.sh`.
 ### Reproduce
 
 ```bash
-# Cache datasets (one-time; 264 MB LongMemEval + 3 MB LoCoMo)
-mnem bench fetch longmemeval     # HuggingFace
-mnem bench fetch locomo          # GitHub raw
-mnem bench fetch                 # alternative: every shipped bench in one go
+mnem bench fetch longmemeval     # download datasets (one-time, 264 MB)
+mnem bench                       # TUI; select benchmarks interactively
+mnem bench run --benches longmemeval --limit 50 --non-interactive
+mnem bench results ./bench-out   # re-render results from a prior run
 
-# Run via interactive wizard or explicit args
-mnem bench                       # TUI; default selects v0.1.0 items
-mnem bench run --benches longmemeval --with mnem --limit 50 --non-interactive
-mnem bench results ./bench-out   # re-render RESULTS.md from prior run
-```
-
-`mnem bench` ships in 0.1.0 with the in-process mnem adapter +
-LongMemEval / LoCoMo scorers + real ONNX MiniLM-L6-v2 (50q canary
-lands R@5 = 0.92, close to the headline 0.966 on the full split).
-ConvoMem, MemBench, hybrid-v4, and mem0 / MemPalace side-by-side
-adapters land in 0.2.0 (TUI lists them today behind `[0.2.0]` tags).
-
-For the headline parity numbers above (full splits), the legacy
-Bash harness remains the canonical reproduction path:
-
-```bash
+# Legacy bash harness (canonical path for headline numbers)
 bash benchmarks/harness/run_bench.sh
 ```
 
-Methodology, raw artifacts, per-bench breakdowns:
-[`benchmarks/`](benchmarks/) and [`docs/src/benchmarks/`](docs/src/benchmarks/).
-See also [`docs/src/benchmarks/run-locally.md`](docs/src/benchmarks/run-locally.md)
-for the `mnem bench` walkthrough.
+Methodology, raw artifacts, per-bench breakdowns: [`benchmarks/`](benchmarks/) and [`docs/src/benchmarks/`](docs/src/benchmarks/).
+
+---
 
 ## Compared to others
 
@@ -444,25 +431,45 @@ for the `mnem bench` walkthrough.
 
 Full matrix: [`docs/src/comparisons/README.md`](docs/src/comparisons/README.md).
 
+---
+
 ## When NOT to use mnem
 
-- **You need transactional OLTP.** mnem is append-only with versioned
-  history; row-level UPDATE/DELETE semantics aren't the model.
-- **You need sub-50 ms cloud-scale retrieval at 10k+ QPS.** mnem is
-  local-first. Multi-region sharded retrieval is on the roadmap, not
-  in v1.
+- **You need transactional OLTP.** mnem is append-only with versioned history; row-level UPDATE/DELETE semantics aren't the model.
+- **You need sub-50 ms cloud-scale retrieval at 10k+ QPS.** mnem is local-first. Multi-region sharded retrieval is on the roadmap, not in v1.
 
-> Looking for hosted memory, multi-region replicas, shared graphs across
-> teams, or a managed remote layer? A sibling project bringing those to
-> mnem is in active development - watch this space.
+> Looking for hosted memory, multi-region replicas, shared graphs across teams, or a managed remote layer? A sibling project bringing those to mnem is in active development - watch this space.
+
+---
 
 ## Architecture
 
-15-crate Rust workspace. WASM-clean core, async/IO at the edges.
-Per-commit embedding sidecars; node identity is decoupled from the
-embedder. Three retrieval lanes (vector + sparse + graph) fused with RRF.
+15-crate Rust workspace. WASM-clean core, async/IO at the edges. Per-commit embedding sidecars; node identity is decoupled from the embedder. Three retrieval lanes (vector + sparse + graph) fused with RRF.
 
 Full overview: [`docs/src/architecture/overview.md`](docs/src/architecture/overview.md).
+
+## Crates
+
+| Crate | Role |
+|-------|------|
+| [`mnem-cli`](crates/mnem-cli) | `mnem` binary - one command for everything |
+| [`mnem-core`](crates/mnem-core) | graph model, retrieval, indexing, sidecars |
+| [`mnem-http`](crates/mnem-http) | HTTP JSON server |
+| [`mnem-mcp`](crates/mnem-mcp) | MCP server (stdio) |
+| [`mnem-py`](crates/mnem-py) | PyO3 Python bindings |
+| [`mnem-embed-providers`](crates/mnem-embed-providers) | ONNX bundled, Ollama, OpenAI, Cohere |
+| [`mnem-sparse-providers`](crates/mnem-sparse-providers) | BM25, SPLADE-onnx |
+| [`mnem-rerank-providers`](crates/mnem-rerank-providers) | Cohere, Voyage |
+| [`mnem-llm-providers`](crates/mnem-llm-providers) | OpenAI, Anthropic, Ollama |
+| [`mnem-ingest`](crates/mnem-ingest) | parse + chunk + extract pipeline |
+| [`mnem-extract`](crates/mnem-extract) | entity extraction (KeyBERT, NER) |
+| [`mnem-bench`](crates/mnem-bench) | benchmark harness (LongMemEval, LoCoMo, etc.) |
+| [`mnem-graphrag`](crates/mnem-graphrag) | community summarisation, centroid + MMR |
+| [`mnem-ann`](crates/mnem-ann) | HNSW wrapper |
+| [`mnem-backend-redb`](crates/mnem-backend-redb) | redb-backed store |
+| [`mnem-transport`](crates/mnem-transport) | CAR codec + remote framing |
+
+---
 
 ## Documentation
 
@@ -479,24 +486,7 @@ Full overview: [`docs/src/architecture/overview.md`](docs/src/architecture/overv
 - [Embedding providers](docs/src/guides/embed-providers.md)
 - [Migrations](docs/src/migrations/)
 
-## Crates
-
-| Crate | Role |
-|-------|------|
-| [`mnem-cli`](crates/mnem-cli) | `mnem` binary - one command for everything |
-| [`mnem-core`](crates/mnem-core) | graph model, retrieval, indexing, sidecars |
-| [`mnem http`](crates/mnem http) | HTTP JSON server |
-| [`mnem mcp`](crates/mnem mcp) | MCP server (stdio) |
-| [`mnem-py`](crates/mnem-py) | PyO3 Python bindings |
-| [`mnem-embed-providers`](crates/mnem-embed-providers) | ONNX bundled, Ollama, OpenAI, Cohere |
-| [`mnem-sparse-providers`](crates/mnem-sparse-providers) | BM25, SPLADE-onnx |
-| [`mnem-rerank-providers`](crates/mnem-rerank-providers) | Cohere, Voyage |
-| [`mnem-llm-providers`](crates/mnem-llm-providers) | OpenAI, Anthropic, Ollama |
-| [`mnem-ingest`](crates/mnem-ingest) | parse + chunk + extract pipeline |
-| [`mnem-graphrag`](crates/mnem-graphrag) | community summarisation, centroid + MMR |
-| [`mnem-ann`](crates/mnem-ann) | HNSW wrapper |
-| [`mnem-backend-redb`](crates/mnem-backend-redb) | redb-backed store |
-| [`mnem-transport`](crates/mnem-transport) | CAR codec + remote framing |
+---
 
 ## Contributing
 
@@ -512,7 +502,16 @@ Issues and PRs welcome. Start here:
 
 ---
 
-⭐ **Find mnem useful?** A star is the strongest signal we get from a
-satisfied builder - it helps the next agent developer find this repo
-when they're stuck on memory. We read every issue, every PR, every
-mention. Tell us what you built.
+## Unintegrate / remove
+
+```bash
+mnem unintegrate                  # interactive: pick which hosts to remove mnem from
+mnem unintegrate claude-code      # remove one host
+mnem unintegrate --all            # remove all wired hosts
+```
+
+Run `mnem unintegrate --help` for all options.
+
+---
+
+⭐ **Find mnem useful?** A star is the strongest signal we get from a satisfied builder - it helps the next agent developer find this repo when they're stuck on memory. We read every issue, every PR, every mention. Tell us what you built.
