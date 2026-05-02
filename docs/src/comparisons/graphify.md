@@ -159,5 +159,5 @@ queries.
 
 - graphify repo, sha `770d7f54c40d` on `v5`, 2026-04-26: <https://github.com/safishamsi/graphify>
 - graphify README ("How it works", "Install", "Make your assistant always use the graph", "Benchmarks"): <https://github.com/safishamsi/graphify/blob/v5/README.md>
-- mnem README + architecture: [`/README.md`](../../../README.md), [`architecture/retrieval.md`](../architecture/retrieval.md)
+- mnem README: [`/README.md`](../../../README.md)
 - mnem benchmarks: [`/benchmarks/proofs/v0.1.0/`](../../../benchmarks/proofs/v0.1.0/)

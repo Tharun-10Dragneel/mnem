@@ -34,7 +34,7 @@
 | 8 | LLM providers | optional, 16 via `mnem-llm-providers` | 16+ (OpenAI, Anthropic, Gemini, Groq, Ollama, ...) | mem0 docs "Supported LLMs" |
 | 9 | Embedding model | bundled ONNX MiniLM-L6-v2 in-process | configurable; default OpenAI `text-embedding-3-small` | mem0 README |
 | 10 | Retrieval lanes | dense (HNSW) + sparse (BM25/SPLADE) + graph + RRF | semantic + BM25 + entity match (v3) | mem0 v3 README |
-| 11 | Token-budget metadata | first-class on every retrieve | not exposed | mnem `architecture/retrieval.md` |
+| 11 | Token-budget metadata | first-class on every retrieve | not exposed | mnem CLI / HTTP API |
 | 12 | Multi-tenancy | repo-per-tenant or scope by node label | hardcoded `user_id` / `agent_id` / `run_id` triple | mem0 SDK |
 | 13 | Bindings | Rust + Python + HTTP + MCP + CLI | Python + TypeScript + REST + MCP | mem0 README badges |
 | 14 | Cloud | none yet | "mem0 Platform": Hobby free, Starter $19, Pro $249, Enterprise | mem0.ai pricing |
@@ -52,10 +52,10 @@ retrieval layer:
 
 | Benchmark | Split | Metric | mem0 (`infer=False`, MiniLM) | mnem | Delta |
 |-----------|-------|--------|------------------------------|-----------|-------|
-| LongMemEval | 500 Q | R@5 session | 0.946 | <font color="#4caf6f">0.966</font> | +0.020 |
-| LongMemEval | 500 Q | R@10 session | 0.962 | <font color="#4caf6f">0.982</font> | +0.020 |
-| LoCoMo | 1986 Q | R@5 session | 0.466 | <font color="#4caf6f">0.726</font> | +0.260 |
-| LoCoMo | 1986 Q | R@10 session | 0.676 | <font color="#4caf6f">0.855</font> | +0.179 |
+| LongMemEval | 500 Q | R@5 session | 0.946 | $\color{green}{\textbf{0.966}}$ | +0.020 |
+| LongMemEval | 500 Q | R@10 session | 0.962 | $\color{green}{\textbf{0.982}}$ | +0.020 |
+| LoCoMo | 1986 Q | R@5 session | 0.466 | $\color{green}{\textbf{0.726}}$ | +0.260 |
+| LoCoMo | 1986 Q | R@10 session | 0.676 | $\color{green}{\textbf{0.855}}$ | +0.179 |
 
 Adapter notes: `infer=False`, persistent `Memory`, per-item `user_id`
 scoping. See [`benchmarks/methodology.md`](../benchmarks/methodology.md).
@@ -148,4 +148,4 @@ offline.
 - mem0 docs: <https://docs.mem0.ai>
 - mem0 evaluation framework: <https://github.com/mem0ai/memory-benchmark>
 - mnem benchmarks: [`/benchmarks/proofs/v0.1.0/`](../../../benchmarks/proofs/v0.1.0/)
-- mnem README + architecture: [`/README.md`](../../../README.md), [`architecture/retrieval.md`](../architecture/retrieval.md)
+- mnem README: [`/README.md`](../../../README.md)

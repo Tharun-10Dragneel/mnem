@@ -14,7 +14,7 @@
 | Content-addressed                | yes                         | no (ChromaDB row IDs)                                 |
 | Bitemporal                       | no                          | partial (`valid_from` / `valid_to` on KG entries)     |
 | WASM target                      | yes                         | no                                                    |
-| MCP server                       | yes (11 tools)              | yes (29 tools)                                        |
+| MCP server                       | yes (18 tools)              | yes (29 tools)                                        |
 | Hybrid retrieval                 | yes (vector + sparse + graph) | yes (semantic + hybrid v4 / v5 with keyword + temporal boost) |
 | Token-budget retrieval metadata  | yes                         | no                                                    |
 | 3-way merge                      | yes                         | no                                                    |
@@ -34,7 +34,7 @@
 | 8 | Conflict resolution | 3-way merge | manual `invalidate` tool | MemPalace MCP tool list |
 | 9 | Sparse lane | BM25 + SPLADE | hybrid-v4 keyword boost | MemPalace BENCHMARKS.md |
 | 10 | Graph lane | first-class (label / prop / adjacency) | KG with timeline + cross-wing tunnels | MemPalace MCP tools |
-| 11 | MCP surface | 11 tools | 29 tools | MemPalace README "MCP server" |
+| 11 | MCP surface | 18 tools | 29 tools | MemPalace README "MCP server" |
 | 12 | Plugin scaffolds | mnem mcp + `mnem integrate` | `.claude-plugin/`, `.codex-plugin/` in repo | MemPalace repo |
 | 13 | Bindings | Rust + Python + TS + HTTP + CLI + MCP | Python + MCP | MemPalace README |
 | 14 | Hosted product | none | none | n/a |
@@ -50,11 +50,11 @@ and ran ours on the same datasets and embedder weights:
 |-----------|-------|--------|-----------|-----------|-------|
 | LongMemEval | 500 Q | R@5 session, raw dense | 0.966 | 0.966 | 0 |
 | LongMemEval | 500 Q | R@10 session, raw dense | 0.982 | 0.982 | 0 |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | <font color="#e05c4b">0.976</font> | -0.006 |
-| LoCoMo | 1986 Q | R@5 session, raw dense | 0.508 | <font color="#4caf6f">0.726</font> | +0.218 |
-| LoCoMo | 1986 Q | R@10 session, raw dense | 0.603 | <font color="#4caf6f">0.855</font> | +0.252 |
-| ConvoMem | 250 Q | Avg recall | 0.890 | <font color="#4caf6f">0.976</font> | +0.086 |
-| MemBench | 100 Q (movie) | R@5 | 0.950 | <font color="#4caf6f">1.000</font> | +0.050 |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | $\color{red}{\textbf{0.976}}$ | -0.006 |
+| LoCoMo | 1986 Q | R@5 session, raw dense | 0.508 | $\color{green}{\textbf{0.726}}$ | +0.218 |
+| LoCoMo | 1986 Q | R@10 session, raw dense | 0.603 | $\color{green}{\textbf{0.855}}$ | +0.252 |
+| ConvoMem | 250 Q | Avg recall | 0.890 | $\color{green}{\textbf{0.976}}$ | +0.086 |
+| MemBench | 100 Q (movie) | R@5 | 0.950 | $\color{green}{\textbf{1.000}}$ | +0.050 |
 
 Method: identical MiniLM-L6-v2 ONNX weights, no reranker, no LLM, no
 lexical lane on the raw-dense rows. The LoCoMo gap comes from mnem's
@@ -100,7 +100,7 @@ to WASM unchanged.
 - **Verbatim store with measured 96.6% R@5 on LongMemEval, no API
   key.** Same as mnem on raw dense, and reproducible from their
   repo.
-- **MCP breadth.** 29 tools to mnem's 11. Agent diaries and cross-wing
+- **MCP breadth.** 29 tools to mnem's 18. Agent diaries and cross-wing
   tunnels are original ideas.
 - **Plugin scaffolds in-repo.** `.claude-plugin/` and `.codex-plugin/`
   lower install friction for Claude Code / Codex users.

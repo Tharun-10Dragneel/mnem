@@ -143,4 +143,4 @@ WASM deployment.
 - Letta docs: <https://docs.letta.com>
 - Letta leaderboard: <https://leaderboard.letta.com>
 - MemGPT paper, arXiv:2310.08560: <https://arxiv.org/abs/2310.08560>
-- mnem README + architecture: [`/README.md`](../../../README.md), [`architecture/overview.md`](../architecture/overview.md)
+- mnem README: [`/README.md`](../../../README.md)

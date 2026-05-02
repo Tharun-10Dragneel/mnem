@@ -1,68 +1,116 @@
 #!/usr/bin/env node
-/**
- * Post-install script for @mnemos/mnem
- * Downloads the prebuilt binary for the current platform
- */
+'use strict';
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { createHash } = require('crypto');
+const { createWriteStream, existsSync, mkdirSync, copyFileSync, readdirSync, chmodSync, rmSync } = require('fs');
+const { join } = require('path');
+const { tmpdir, platform } = require('os');
+const { spawnSync } = require('child_process');
 
-const PKG_VERSION = require('./package.json').version;
-const BIN_DIR = path.join(__dirname, 'bin');
-const MNEM_BIN = path.join(BIN_DIR, process.platform === 'win32' ? 'mnem.exe' : 'mnem');
+const VERSION = process.env.npm_package_version;
+const PKG_DIR = join(__dirname, '..');
 
-function getPlatform() {
-  const platform = process.platform;
-  const arch = process.arch;
+const TRIPLES = {
+  'darwin-arm64': { triple: 'aarch64-apple-darwin',      ext: 'tar.gz', exe: 'mnem' },
+  'darwin-x64':   { triple: 'x86_64-apple-darwin',       ext: 'tar.gz', exe: 'mnem' },
+  'linux-arm64':  { triple: 'aarch64-unknown-linux-gnu', ext: 'tar.gz', exe: 'mnem' },
+  'linux-x64':    { triple: 'x86_64-unknown-linux-gnu',  ext: 'tar.gz', exe: 'mnem' },
+  'win32-x64':    { triple: 'x86_64-pc-windows-msvc',    ext: 'zip',    exe: 'mnem.exe' },
+};
 
-  if (platform === 'darwin') {
-    return arch === 'arm64' ? 'macos-arm64' : 'macos-x64';
+const BASE_URL = `https://github.com/Uranid/mnem/releases/download/v${VERSION}`;
+
+async function main() {
+  const key = `${platform()}-${process.arch}`;
+  const target = TRIPLES[key];
+  if (!target) {
+    warn(`Unsupported platform: ${key}. Install manually: cargo install --locked mnem-cli`);
+    return;
   }
-  if (platform === 'linux') {
-    return arch === 'arm64' ? 'linux-aarch64' : 'linux-x86_64';
+
+  const { triple, ext, exe } = target;
+  const archiveName = `mnem-${triple}.${ext}`;
+  const archiveURL  = `${BASE_URL}/${archiveName}`;
+  const sha256URL   = `${archiveURL}.sha256`;
+
+  const tmpDir = join(tmpdir(), `mnem-install-${Date.now()}`);
+  mkdirSync(tmpDir, { recursive: true });
+  const archivePath = join(tmpDir, archiveName);
+
+  try {
+    process.stdout.write(`mnem postinstall: downloading ${archiveName}…\n`);
+
+    await download(archiveURL, archivePath);
+
+    const shaResp = await fetch(sha256URL);
+    if (!shaResp.ok) throw new Error(`SHA256 fetch failed: ${shaResp.status}`);
+    const shaLine = await shaResp.text();
+    const expected = shaLine.trim().split(/\s+/)[0];
+    const actual = fileHash(archivePath);
+    if (actual !== expected) throw new Error(`SHA256 mismatch: expected ${expected}, got ${actual}`);
+
+    const extractDir = join(tmpDir, 'extracted');
+    mkdirSync(extractDir, { recursive: true });
+    extract(archivePath, extractDir);
+
+    const binSrc = join(extractDir, `mnem-${triple}`, 'bin', exe);
+    const binDir = join(PKG_DIR, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const binDst = join(binDir, exe);
+    copyFileSync(binSrc, binDst);
+    if (process.platform !== 'win32') chmodSync(binDst, 0o755);
+
+    const libSrc = join(extractDir, `mnem-${triple}`, 'lib');
+    const libDir = join(PKG_DIR, 'lib');
+    mkdirSync(libDir, { recursive: true });
+    if (existsSync(libSrc)) {
+      for (const f of readdirSync(libSrc)) {
+        copyFileSync(join(libSrc, f), join(libDir, f));
+      }
+    }
+
+    process.stdout.write(`mnem postinstall: installed ${binDst}\n`);
+  } catch (err) {
+    warn(`Download failed: ${err.message}\nFallback: cargo install --locked mnem-cli`);
+  } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
   }
-  if (platform === 'win32') {
-    return 'windows-x86_64';
-  }
-  throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
 
-function getDownloadURL() {
-  const platform = getPlatform();
-  const ext = platform.startsWith('windows') ? 'zip' : 'tar.gz';
-  return `https://github.com/Uranid/mnem/releases/download/v${PKG_VERSION}/mnem-${platform}.${ext}`;
+async function download(url, dest) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+  const writer = createWriteStream(dest);
+  const reader = resp.body.getReader();
+  await new Promise((resolve, reject) => {
+    writer.on('error', reject);
+    writer.on('finish', resolve);
+    (async () => {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) { writer.end(); break; }
+          writer.write(Buffer.from(value));
+        }
+      } catch (e) { writer.destroy(e); }
+    })();
+  });
 }
 
-async function downloadBinary() {
-  console.log(`Downloading mnem ${PKG_VERSION} for ${getPlatform()}...`);
-
-  // For now, just warn that they should use cargo install
-  console.log('');
-  console.log('NOTE: npm install currently works best with the bundled embedder:');
-  console.log('  npm install -g @mnemos/mnem');
-  console.log('');
-  console.log('Or install from source:');
-  console.log('  cargo install --locked mnem-cli --features bundled-embedder');
-  console.log('');
-
-  // TODO: Implement actual binary download when releases are published
-  // For now, this package just provides the npm package scaffolding
-  console.log('Full binary downloads coming in v0.2.0 release.');
+function fileHash(path) {
+  const data = require('fs').readFileSync(path);
+  return createHash('sha256').update(data).digest('hex');
 }
 
-if (fs.existsSync(MNEM_BIN)) {
-  console.log('mnem binary already installed.');
-} else {
-  // Skip download for now - just ensure bin directory exists
-  if (!fs.existsSync(BIN_DIR)) {
-    fs.mkdirSync(BIN_DIR, { recursive: true });
-  }
-  console.log('mnem binary will be available after full v0.2.0 release.');
+function extract(archive, dest) {
+  const r = spawnSync('tar', ['-xf', archive, '-C', dest], { stdio: 'inherit' });
+  if (r.status !== 0) throw new Error(`Extraction failed (status ${r.status})`);
 }
 
-console.log('');
-console.log('Get started:');
-console.log('  mnem --version');
-console.log('  mnem init');
-console.log('  mnem doctor');
+function warn(msg) {
+  process.stderr.write(`mnem postinstall WARNING: ${msg}\n`);
+}
+
+main().catch(err => {
+  warn(`Unexpected error: ${err.message}`);
+});

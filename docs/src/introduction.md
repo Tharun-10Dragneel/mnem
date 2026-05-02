@@ -17,7 +17,7 @@ the result over CLI, HTTP, and MCP surfaces.
 
 - A vector database (it's a graph; vectors are one signal among several).
 - An LLM (mnem holds memory; the LLM uses it).
-- A finished product. 0.1.0 is the first public cut. See [roadmap](./architecture/overview.md#roadmap).
+- A finished product. 0.1.0 is the first public cut.
 
 ## Where to next
 

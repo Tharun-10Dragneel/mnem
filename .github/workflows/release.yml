@@ -809,6 +809,40 @@ jobs:
           installers-regex: 'mnem-x86_64-pc-windows-msvc\.zip$'
 
   # -----------------------------------------------------------------
+  # npm package (@uranid/mnem). Postinstall downloads the platform
+  # binary from the GitHub release; the tarball contains only the
+  # JS shim and postinstall script (no native binary committed).
+  #
+  # Requires: NPM_TOKEN repo secret (Automation token from npmjs.com).
+  # -----------------------------------------------------------------
+  publish-npm:
+    name: publish npm (@uranid/mnem)
+    needs: [release, binaries]
+    if: needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Sync version from Cargo.toml
+        run: |
+          set -euo pipefail
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          cd npm-packages/mnem-cli
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - name: Publish
+        run: npm publish --access public
+        working-directory: npm-packages/mnem-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # -----------------------------------------------------------------
   # Scoop (Windows) bucket update. Assumes a separate
   # `Uranid/scoop-mnem` repo holds the manifest; this action
   # recomputes the archive hash and pushes the new version. Safe to

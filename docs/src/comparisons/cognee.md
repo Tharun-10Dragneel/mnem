@@ -137,4 +137,4 @@ WASM / edge targets.
 - Cognee docs: <https://docs.cognee.ai>
 - Cognee Cloud: <https://www.cognee.ai>
 - mnem benchmarks: [`/benchmarks/proofs/v0.1.0/`](../../../benchmarks/proofs/v0.1.0/)
-- mnem README + architecture: [`/README.md`](../../../README.md), [`architecture/retrieval.md`](../architecture/retrieval.md)
+- mnem README: [`/README.md`](../../../README.md)
