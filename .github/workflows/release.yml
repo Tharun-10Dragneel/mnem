@@ -824,11 +824,12 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write   # required for npm OIDC trusted publishing (no token needed)
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'   # OIDC publishing requires Node 22+ / npm 11.5.1+
           registry-url: 'https://registry.npmjs.org'
       - name: Sync version from Cargo.toml
         run: |
@@ -837,10 +838,11 @@ jobs:
           cd npm-packages/mnem-cli
           npm version "$VERSION" --no-git-tag-version --allow-same-version
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         working-directory: npm-packages/mnem-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No NODE_AUTH_TOKEN - uses npm OIDC trusted publishing.
+        # Requires @uranid/mnem to exist on npmjs.com (first publish is manual)
+        # and this workflow registered as a trusted publisher in the npm package settings.
 
   # -----------------------------------------------------------------
   # Scoop (Windows) bucket update. Assumes a separate

@@ -12,6 +12,18 @@ mnem --version
 
 Requires Rust 1.95+ (see `rust-toolchain.toml`).
 
+## From npm (Node.js users)
+
+```bash
+npm install -g @uranid/mnem
+mnem --version
+
+# or one-shot via npx
+npx @uranid/mnem --version
+```
+
+Downloads the prebuilt native binary for your platform at install time. Node 18+ required. No Rust toolchain needed.
+
 ## From PyPI (Python users)
 
 ```bash
@@ -45,6 +57,9 @@ supports `bundled-embedder`, `bundled-embedder-cuda`,
 <summary>macOS / Linux / Windows</summary>
 
 ```bash
+# npm (Node 18+, no Rust toolchain needed)
+npm install -g @uranid/mnem
+
 # Cargo (any platform with Rust 1.95+)
 cargo install --locked mnem-cli --features bundled-embedder
 
