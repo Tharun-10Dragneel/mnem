@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -242,3 +242,4 @@ redb                 = "4.1"
 # --- dev-dependencies ---
 proptest             = "1.11"
 criterion            = { version = "0.8", default-features = false, features = ["html_reports"] }
+
