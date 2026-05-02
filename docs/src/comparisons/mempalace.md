@@ -46,15 +46,15 @@ MemPalace publishes retrieval R@5 / R@10 numbers in the same family as
 mnem's harness. We pulled their numbers from `benchmarks/BENCHMARKS.md`
 and ran ours on the same datasets and embedder weights:
 
-| Benchmark | Split | Metric | MemPalace | mnem 0.1.0 | Delta |
+| Benchmark | Split | Metric | MemPalace | mnem | Delta |
 |-----------|-------|--------|-----------|-----------|-------|
 | LongMemEval | 500 Q | R@5 session, raw dense | 0.966 | 0.966 | 0 |
 | LongMemEval | 500 Q | R@10 session, raw dense | 0.982 | 0.982 | 0 |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | 0.976 | -0.006 |
-| LoCoMo | 1986 Q | R@5 session, raw dense | 0.508 | 0.726 | +0.218 |
-| LoCoMo | 1986 Q | R@10 session, raw dense | 0.603 | 0.855 | +0.252 |
-| ConvoMem | 250 Q | Avg recall | 0.890 | 0.976 | +0.086 |
-| MemBench | 100 Q (movie) | R@5 | 0.950 | 1.000 | +0.050 |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | <font color="#e05c4b">0.976</font> | -0.006 |
+| LoCoMo | 1986 Q | R@5 session, raw dense | 0.508 | <font color="#4caf6f">0.726</font> | +0.218 |
+| LoCoMo | 1986 Q | R@10 session, raw dense | 0.603 | <font color="#4caf6f">0.855</font> | +0.252 |
+| ConvoMem | 250 Q | Avg recall | 0.890 | <font color="#4caf6f">0.976</font> | +0.086 |
+| MemBench | 100 Q (movie) | R@5 | 0.950 | <font color="#4caf6f">1.000</font> | +0.050 |
 
 Method: identical MiniLM-L6-v2 ONNX weights, no reranker, no LLM, no
 lexical lane on the raw-dense rows. The LoCoMo gap comes from mnem's

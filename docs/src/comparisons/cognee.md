@@ -50,8 +50,8 @@ substrate layer.
 
 mnem's measured retrieval numbers under ONNX MiniLM-L6-v2:
 
-| Benchmark | Split | Metric | mnem 0.1.0 |
-|-----------|-------|--------|-----------|
+| Benchmark | Split | Metric | mnem |
+|-----------|-------|--------|------|
 | LongMemEval | 500 Q | R@5 session | 0.966 |
 | LoCoMo | 1986 Q | R@5 session | 0.726 |
 | ConvoMem | 250 Q | Avg recall | 0.976 |

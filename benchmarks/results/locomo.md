@@ -9,7 +9,7 @@ session_id.
 | System | R@5 | R@10 | Source |
 |--------|----:|-----:|--------|
 | MemPalace | 0.508 | 0.603 | published |
-| **mnem 0.1.0** | **0.726** | **0.855** | `proofs/v0.1.0/locomo-session.jsonl` |
+| **mnem** | **0.726** | **0.855** | `proofs/v0.1.0/locomo-session.jsonl` |
 
 mnem **+0.218 R@5** and **+0.252 R@10** over MemPalace.
 

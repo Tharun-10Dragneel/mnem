@@ -8,13 +8,13 @@ Substring-match recall (gold evidence text in retrieved item text).
 | System | avg_recall | Source |
 |--------|-----------:|--------|
 | MemPalace | 0.929 | `artefacts/convomem/convomem-mempalace-raw-250.json` |
-| **mnem 0.1.0** | **0.976** | `artefacts/convomem/convomem-mnem-250.jsonl` |
+| **mnem** | **0.976** | `artefacts/convomem/convomem-mnem-250.jsonl` |
 
 mnem +0.047 over MemPalace.
 
 ## Per-category
 
-| Category | mnem 0.1.0 |
+| Category | mnem |
 |----------|-----------:|
 | `assistant_facts_evidence` | 0.93 |
 | `implicit_connection_evidence` | 0.92 |

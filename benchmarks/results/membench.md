@@ -11,7 +11,7 @@ top-K retrieved turns).
 | System | R@5 | Source |
 |--------|----:|--------|
 | MemPalace | 0.840 | published |
-| **mnem 0.1.0** | **0.960** | `proofs/v0.1.0/membench-simple-roles.jsonl` |
+| **mnem** | **0.960** | `proofs/v0.1.0/membench-simple-roles.jsonl` |
 
 mnem **+0.120** over MemPalace.
 
@@ -20,7 +20,7 @@ mnem **+0.120** over MemPalace.
 | System | R@5 | Source |
 |--------|----:|--------|
 | MemPalace | 0.950 | published |
-| **mnem 0.1.0** | **1.000** | `proofs/v0.1.0/membench-highlevel-movie.jsonl` |
+| **mnem** | **1.000** | `proofs/v0.1.0/membench-highlevel-movie.jsonl` |
 
 mnem **+0.050** over MemPalace.
 

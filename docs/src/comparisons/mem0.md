@@ -50,12 +50,12 @@ We have a same-harness, same-embedder reproduction of mem0 with
 `infer=False` (LLM extraction off) so the comparison lands on the
 retrieval layer:
 
-| Benchmark | Split | Metric | mem0 (`infer=False`, MiniLM) | mnem 0.1.0 | Delta |
+| Benchmark | Split | Metric | mem0 (`infer=False`, MiniLM) | mnem | Delta |
 |-----------|-------|--------|------------------------------|-----------|-------|
-| LongMemEval | 500 Q | R@5 session | 0.946 | 0.966 | +0.020 |
-| LongMemEval | 500 Q | R@10 session | 0.962 | 0.982 | +0.020 |
-| LoCoMo | 1986 Q | R@5 session | 0.466 | 0.726 | +0.260 |
-| LoCoMo | 1986 Q | R@10 session | 0.676 | 0.855 | +0.179 |
+| LongMemEval | 500 Q | R@5 session | 0.946 | <font color="#4caf6f">0.966</font> | +0.020 |
+| LongMemEval | 500 Q | R@10 session | 0.962 | <font color="#4caf6f">0.982</font> | +0.020 |
+| LoCoMo | 1986 Q | R@5 session | 0.466 | <font color="#4caf6f">0.726</font> | +0.260 |
+| LoCoMo | 1986 Q | R@10 session | 0.676 | <font color="#4caf6f">0.855</font> | +0.179 |
 
 Adapter notes: `infer=False`, persistent `Memory`, per-item `user_id`
 scoping. See [`benchmarks/methodology.md`](../benchmarks/methodology.md).

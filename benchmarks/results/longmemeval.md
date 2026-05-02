@@ -8,7 +8,7 @@ Session-level retrieval: aggregate turn hits to session via MAX score.
 | System | R@5 | R@10 | Source |
 |--------|----:|-----:|--------|
 | MemPalace | 0.966 | 0.982 | published |
-| **mnem 0.1.0** | **0.966** | **0.982** | `proofs/v0.1.0/longmemeval-500q.jsonl` |
+| **mnem** | **0.966** | **0.982** | `proofs/v0.1.0/longmemeval-500q.jsonl` |
 
 Matches MemPalace exactly. No daylight either way.
 
@@ -17,7 +17,7 @@ Matches MemPalace exactly. No daylight either way.
 | System | R@5 | Source |
 |--------|----:|--------|
 | MemPalace | 0.982 | published |
-| **mnem 0.1.0** | **0.976** | `proofs/v0.1.0/longmemeval-500q-hybrid-v4.jsonl` |
+| **mnem** | **0.976** | `proofs/v0.1.0/longmemeval-500q-hybrid-v4.jsonl` |
 
 `--hybrid-v4-boost` mirrors MemPalace's harness-side BM25-derived score
 boost. Apple-to-apple bench helper, NOT a default for production.

@@ -53,8 +53,8 @@ at supermemory by default. Their headline:
 mnem's reproducible numbers under ONNX MiniLM-L6-v2, no LLM in the
 loop:
 
-| Benchmark | Split | Metric | mnem 0.1.0 |
-|-----------|-------|--------|-----------|
+| Benchmark | Split | Metric | mnem |
+|-----------|-------|--------|------|
 | LongMemEval | 500 Q | R@5 session | 0.966 |
 | LongMemEval | 500 Q | R@10 session | 0.982 |
 | LoCoMo | 1986 Q | R@5 session | 0.726 |

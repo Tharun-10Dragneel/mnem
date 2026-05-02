@@ -356,16 +356,16 @@ MemPalace's harness helper. Reproduce: `bash benchmarks/harness/run_bench.sh`.
 > dataset hashes. Both columns are reproducible; raw artefacts in
 > [`benchmarks/proofs/v0.1.0/`](benchmarks/proofs/v0.1.0/).
 
-| Benchmark | Split | Metric | MP | mnem 0.1.0 | Delta |
+| Benchmark | Split | Metric | MP | mnem | Delta |
 |-----------|-------|--------|----|-----------|-------|
 | LongMemEval | 500 Q | R@5 session | 0.966 | **0.966** | 0 |
 | LongMemEval | 500 Q | R@10 session | 0.982 | **0.982** | 0 |
-| LoCoMo | 1986 Q | R@5 session | 0.508 | <font color="green">**0.726**</font> | **+0.218** |
-| LoCoMo | 1986 Q | R@10 session | 0.603 | <font color="green">**0.855**</font> | **+0.252** |
-| ConvoMem | 250 (5x50) | avg recall | 0.929 | <font color="green">**0.976**</font> | **+0.047** |
-| MemBench | simple/roles 100 | R@5 | 0.840 | <font color="green">**0.960**</font> | **+0.120** |
-| MemBench | highlevel/movie 100 | R@5 | 0.950 | <font color="green">**1.000**</font> | **+0.050** |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | <font color="red">0.976</font> | -0.006 |
+| LoCoMo | 1986 Q | R@5 session | 0.508 | <font color="#4caf6f">**0.726**</font> | **+0.218** |
+| LoCoMo | 1986 Q | R@10 session | 0.603 | <font color="#4caf6f">**0.855**</font> | **+0.252** |
+| ConvoMem | 250 (5x50) | avg recall | 0.929 | <font color="#4caf6f">**0.976**</font> | **+0.047** |
+| MemBench | simple/roles 100 | R@5 | 0.840 | <font color="#4caf6f">**0.960**</font> | **+0.120** |
+| MemBench | highlevel/movie 100 | R@5 | 0.950 | <font color="#4caf6f">**1.000**</font> | **+0.050** |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.982 | <font color="#e05c4b">0.976</font> | -0.006 |
 
 ### vs mem0
 
@@ -377,16 +377,16 @@ MemPalace's harness helper. Reproduce: `bash benchmarks/harness/run_bench.sh`.
 > Both columns reproducible; raw artefacts in
 > [`benchmarks/proofs/v0.1.0/`](benchmarks/proofs/v0.1.0/).
 
-| Benchmark | Split | Metric | mem0 | mnem 0.1.0 | Delta |
+| Benchmark | Split | Metric | mem0 | mnem | Delta |
 |-----------|-------|--------|------|-----------|-------|
-| LongMemEval | 500 Q | R@5 session | 0.946 | <font color="green">**0.966**</font> | **+0.020** |
-| LongMemEval | 500 Q | R@10 session | 0.962 | <font color="green">**0.982**</font> | **+0.020** |
-| LoCoMo | 1986 Q | R@5 session | 0.466 | <font color="green">**0.726**</font> | **+0.260** |
-| LoCoMo | 1986 Q | R@10 session | 0.676 | <font color="green">**0.855**</font> | **+0.179** |
-| ConvoMem | 250 (5x50) | avg recall | 0.558 | <font color="green">**0.976**</font> | **+0.418** |
-| MemBench | simple/roles 100 | R@5 | 0.410 | <font color="green">**0.960**</font> | **+0.550** |
-| MemBench | highlevel/movie 100 | R@5 | 0.970 | <font color="green">**1.000**</font> | **+0.030** |
-| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.930 | <font color="green">**0.976**</font> | **+0.046** |
+| LongMemEval | 500 Q | R@5 session | 0.946 | <font color="#4caf6f">**0.966**</font> | **+0.020** |
+| LongMemEval | 500 Q | R@10 session | 0.962 | <font color="#4caf6f">**0.982**</font> | **+0.020** |
+| LoCoMo | 1986 Q | R@5 session | 0.466 | <font color="#4caf6f">**0.726**</font> | **+0.260** |
+| LoCoMo | 1986 Q | R@10 session | 0.676 | <font color="#4caf6f">**0.855**</font> | **+0.179** |
+| ConvoMem | 250 (5x50) | avg recall | 0.558 | <font color="#4caf6f">**0.976**</font> | **+0.418** |
+| MemBench | simple/roles 100 | R@5 | 0.410 | <font color="#4caf6f">**0.960**</font> | **+0.550** |
+| MemBench | highlevel/movie 100 | R@5 | 0.970 | <font color="#4caf6f">**1.000**</font> | **+0.030** |
+| LongMemEval | 500 Q hybrid-v4 | R@5 session | 0.930 | <font color="#4caf6f">**0.976**</font> | **+0.046** |
 
 ### Latency
 
