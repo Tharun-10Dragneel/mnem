@@ -153,12 +153,9 @@ jobs:
             use_cross: true
             ort_url: 'https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-aarch64-1.20.1.tgz'
             ort_lib_glob: 'libonnxruntime.so.1.20.1'
-          - triple: x86_64-apple-darwin
-            runner: macos-13
-            archive: tar.gz
-            use_cross: false
-            ort_url: 'https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-osx-x86_64-1.20.1.tgz'
-            ort_lib_glob: 'libonnxruntime.1.20.1.dylib'
+          # x86_64-apple-darwin dropped: macos-13 runners have near-zero
+          # availability on GitHub's free tier. Intel Mac users can
+          # cargo install or use the aarch64 binary via Rosetta 2.
           - triple: aarch64-apple-darwin
             runner: macos-latest
             archive: tar.gz
@@ -579,9 +576,7 @@ jobs:
           - triple: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
             manylinux: "2014"
-          - triple: x86_64-apple-darwin
-            runner: macos-13
-            manylinux: "auto"
+          # x86_64-apple-darwin dropped: macos-13 runner unavailability.
           - triple: aarch64-apple-darwin
             runner: macos-latest
             manylinux: "auto"
@@ -649,11 +644,11 @@ jobs:
     if: needs.release.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     environment: production
-    # Multi-arch buildx (linux/amd64 + linux/arm64) on QEMU emulates
-    # arm64, which compiles ort + the workspace at QEMU speed (~3x
-    # slower than native amd64). Budget 3h to avoid auto-cancel during
-    # cold builds without cache.
-    timeout-minutes: 180
+    # linux/amd64 only: ARM64 via QEMU took 3h+ and hit timeout every
+    # cold-cache run. ARM64 users pull the amd64 image via Rosetta 2 /
+    # Docker's --platform flag. Native ARM64 image can be re-added when
+    # a self-hosted arm64 runner or GitHub's arm64 runners are available.
+    timeout-minutes: 240
     # Job-level env so `if: env.DOCKERHUB_USERNAME != ''` on downstream
     # steps evaluates BEFORE the step runs (step-level env isn't in
     # scope for its own `if:` guard - a subtle GHA gotcha).
@@ -710,7 +705,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           # onnx feature in the image so `sparse.provider = "onnx"`
           # works inside the container without a custom build.
