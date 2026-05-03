@@ -588,6 +588,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Sync mnem-py version from Cargo.toml
+        shell: python
+        run: |
+          import re
+          tag = "${{ needs.release.outputs.tag }}"
+          version = tag.lstrip("v")
+          path = "crates/mnem-py/pyproject.toml"
+          text = open(path).read()
+          text = re.sub(r'^version = ".*"$', f'version = "{version}"', text, flags=re.MULTILINE)
+          open(path, "w").write(text)
+          print(f"mnem-py version set to {version}")
       - name: Build wheel (maturin)
         uses: PyO3/maturin-action@v1
         with:
@@ -839,6 +850,49 @@ jobs:
         # No NODE_AUTH_TOKEN - uses npm OIDC trusted publishing.
         # Requires mnem-cli to exist on npmjs.com (first publish is manual)
         # and this workflow registered as a trusted publisher in the npm package settings.
+
+  # -----------------------------------------------------------------
+  # pip package (mnem-cli). Pure-Python wrapper that downloads the
+  # platform binary from the GitHub release on first invocation.
+  # Mirrors the npm-packages/mnem-cli/ pattern; no compiled extension.
+  #
+  # Requires: PyPI "Trusted Publisher" configured for this repo +
+  # environment `production`, with package name `mnem-cli`.
+  # -----------------------------------------------------------------
+  publish-pip-cli:
+    name: publish PyPI (mnem-cli)
+    needs: [release, binaries]
+    if: needs.release.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Sync mnem-cli version from Cargo.toml
+        shell: python
+        run: |
+          import re
+          tag = "${{ needs.release.outputs.tag }}"
+          version = tag.lstrip("v")
+          path = "py-packages/mnem-cli/pyproject.toml"
+          text = open(path).read()
+          text = re.sub(r'^version = ".*"$', f'version = "{version}"', text, flags=re.MULTILINE)
+          open(path, "w").write(text)
+          print(f"mnem-cli pip version set to {version}")
+      - name: Build wheel + sdist
+        run: |
+          pip install build
+          cd py-packages/mnem-cli
+          python -m build --outdir ../../dist/
+      - name: Publish to PyPI (Trusted Publisher / OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
 
   # -----------------------------------------------------------------
   # Scoop (Windows) bucket update. Assumes a separate
