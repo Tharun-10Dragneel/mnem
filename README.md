@@ -9,7 +9,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat)](LICENSE)
 [![CI](https://github.com/Uranid/mnem/actions/workflows/ci.yml/badge.svg)](https://github.com/Uranid/mnem/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/mnem-cli.svg?style=flat)](https://crates.io/crates/mnem-cli)
-[![docs.rs](https://img.shields.io/docsrs/mnem-core?style=flat&label=docs.rs)](https://docs.rs/mnem-core)
+[![PyPI](https://img.shields.io/pypi/v/mnem-py.svg?style=flat)](https://pypi.org/project/mnem-py/)
+[![npm](https://img.shields.io/npm/v/mnem-cli.svg?style=flat)](https://www.npmjs.com/package/mnem-cli)
 [![MSRV 1.95](https://img.shields.io/badge/MSRV-1.95-orange?style=flat)](rust-toolchain.toml)
 [![Runs on Linux macOS Windows WASM](https://img.shields.io/badge/runs%20on-linux%20%7C%20macos%20%7C%20windows%20%7C%20wasm-2ea44f?style=flat)](#install)
 
