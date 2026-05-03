@@ -9,29 +9,33 @@ pip install mnem-py
 ```python
 import pymnem
 
-# In-memory (tests, notebooks, agent sessions without persistence)
-repo = pymnem.Repo.init_memory()
+# pip install sentence-transformers  (downloads ~23 MB model on first use,
+# cached in ~/.cache/huggingface/ - subsequent calls are fully local)
+from sentence_transformers import SentenceTransformer
 
-# Or on-disk via the embedded redb backend
+model = SentenceTransformer("all-MiniLM-L6-v2")
+MODEL_NAME = "all-MiniLM-L6-v2"  # label mnem uses to match query vs stored vectors
+
+# In-memory repo (tests, notebooks, agent sessions without persistence)
+repo = pymnem.Repo.init_memory()
+# Or on-disk via the embedded redb backend:
 # repo = pymnem.Repo.open_or_init("/path/to/repo.redb")
 
-# Write one node at a time
-repo.commit_node(
-    author="alice@example.com",
-    message="seed",
-    ntype="Memory",
-    summary="Alice lives in Berlin and works at Globex",
-    props={"name": "Alice", "city": "Berlin"},
-)
+# Write nodes - compute an embedding for each and attach it with add_embedding_f32
+with repo.transaction(author="alice@example.com", message="seed") as tx:
+    for text in [
+        "Alice lives in Berlin and works at Globex",
+        "Alice's hobby is rock climbing",
+        "Bob moved to Paris last month",
+    ]:
+        tx.add_node(ntype="Memory", summary=text)
+        tx.add_embedding_f32(MODEL_NAME, model.encode(text).tolist())
 
-# Or batch with a transaction (context-manager commits on clean exit)
-with repo.transaction(author="alice@example.com", message="seed batch") as tx:
-    tx.add_node(ntype="Memory", summary="Alice's hobby is climbing")
-    tx.add_node(ntype="Memory", summary="Bob moved to Paris last month")
-
-# Retrieve under a token budget - dense vector + optional learned-sparse, RRF-fused
+# Retrieve - compute a query vector with the same model, mnem ranks under token budget
+query_vec = model.encode("Alice Berlin").tolist()
 result = repo.retrieve(
-    text="Alice Berlin",
+    vector=query_vec,
+    model=MODEL_NAME,    # must match what was used at write time
     token_budget=500,
     limit=10,
 )
@@ -98,9 +102,9 @@ step means shipping the pyo3 bindings without having loaded them.
 
 The Python wrapper is a thin pyo3 layer; retrieval throughput is what the Rust core measures in [`docs/benchmarks/ai-native.md`](../../docs/benchmarks/ai-native.md). At 1000 Doc nodes on laptop hardware:
 
-- `retrieve(text=...)` fresh-index end-to-end: **~6 ms** (in-memory) / **~14 ms** (redb)
-- Amortised text search (pre-built index held for a session): **~11 µs** (memory) / **~21 µs** (redb)
-- Fused text + vector retrieve: **~10 ms** (memory) / **~21 ms** (redb)
+- `retrieve(vector=...)` fresh-index end-to-end: **~6 ms** (in-memory) / **~14 ms** (redb)
+- Amortised vector retrieve (index held for a session): **~11 µs** (memory) / **~21 µs** (redb)
+- Fused vector + sparse retrieve: **~10 ms** (memory) / **~21 ms** (redb)
 
 The Python-to-Rust boundary costs <50 µs per call in practice, well below the retrieval work.
 
