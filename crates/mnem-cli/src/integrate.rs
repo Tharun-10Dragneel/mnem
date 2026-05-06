@@ -77,9 +77,7 @@ impl IntegrationRegistry {
 }
 
 fn global_dir() -> std::path::PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".mnemglobal")
+    crate::global::default_dir()
 }
 
 /// Record a successful integration into `~/.mnemglobal/integrations.toml`.
@@ -408,12 +406,33 @@ need to mention mnem.
 
 ## Reading memory (before you answer)
 
-A `UserPromptSubmit` hook has already run: it calls `mnem retrieve` (local
-graph, current project) first; if no local graph is found it falls back to
-`mnem global retrieve` (global graph). Look for the hook output in context —
-**do NOT duplicate those calls**. If the hook output is absent or empty,
-call `mnem_retrieve` first; if that errors (no local graph), call
-`mnem_global_retrieve` as fallback.
+A `UserPromptSubmit` hook has already run: it calls BOTH `mnem retrieve`
+(local graph, current project) AND `mnem global retrieve` (global graph)
+unconditionally. Its output appears as a system-injected message immediately
+before this turn (look for text like `# N item(s)` or `0 item(s)`). Content
+from earlier human or assistant turns in this conversation is NOT hook output
+— that is conversation history. Do NOT confuse the two.
+
+**Before applying any rule below**: confirm that what you are calling "hook
+output" is the injected pre-turn message, not something from an earlier turn.
+If uncertain, treat it as conversation history and apply the absent/empty rule.
+
+After identifying the hook output, decide whether to call mnem tools:
+
+- If the hook output is **absent** (no injected message) or **empty** (message
+  present but shows "0 item(s)" or zero results): always call
+  `mnem_global_retrieve` (NOT `mnem_retrieve`) with a focused query for the
+  topic at hand — even if the topic appeared in an earlier turn of this
+  conversation. Do NOT rely on conversation history as a substitute; facts may
+  have been added or changed.
+- If the hook output has results but the **specific fact being asked is absent**
+  (results mention a relevant entity but do not include the specific attribute
+  the user asked about — e.g. who created something, when it happened): call
+  `mnem_global_retrieve` (NOT `mnem_retrieve`) with a focused query before
+  answering.
+- If the hook output **completely and directly answers the specific question**
+  including the exact attribute asked (not just that a related entity exists):
+  answer from those results; do not re-call the same query.
 
 ## Writing memory (after you answer)
 
@@ -438,7 +457,11 @@ the user stated or confirmed. Use these rules:
 - Connect entities with edges: `works_at`, `lives_in`, `traveling_with`,
   `has_preference`, `extracted_from`, etc. Use the compound
   `mnem_commit_relation` tool when both endpoints are entities - it
-  resolve-or-creates both nodes and adds the edge in one call.
+  resolve-or-creates both nodes and adds the edge in one call. After
+  `mnem_commit_relation`, also call `mnem_commit` with a complete standalone
+  summary sentence so the relationship is
+  findable via text search — entity nodes have no summary and are invisible
+  to the retriever otherwise.
 - Do NOT commit model output or your own reasoning. Only commit facts the
   user stated or confirmed.
 
@@ -519,10 +542,10 @@ treats them as the default reading and writing channel for facts the
 user shares.
 
 The pre-prompt hook (wired automatically by `mnem integrate` for
-supported hosts) gives a stronger guarantee: it runs `mnem retrieve`
-(local) before the LLM ever sees the user's message, falling back to
-`mnem global retrieve` if no local graph is found. Pair the two for
-the strongest "automatic memory" experience.
+supported hosts) gives a stronger guarantee: it runs BOTH `mnem retrieve`
+(local) AND `mnem global retrieve` (global) before the LLM ever sees
+the user's message, so facts from any graph are always surfaced. Pair
+the two for the strongest "automatic memory" experience.
 
 ## See also
 
@@ -567,7 +590,9 @@ preference, event, entity, or goal — commit it SILENTLY without asking first.
 - Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
 - Connect entities with typed edges: `works_at`, `lives_in`, `has_preference`,
   `extracted_from`, `revoked_by`, `traveling_with`, `happened_before`, `mentions`.
-- Use `mnem_commit_relation` when both endpoints are named entities.
+- Use `mnem_commit_relation` when both endpoints are named entities. Then also call
+  `mnem_commit` with a standalone summary sentence —
+  entity nodes have no summary and are invisible to text search otherwise.
 - Only commit facts the user stated or confirmed — never your reasoning or drafts.
 - Set `agent_id` to this host's slug on every write (`"cursor"`, `"gemini-cli"`, etc.).
 
@@ -649,7 +674,9 @@ preference, event, entity, or goal — commit it SILENTLY without asking first.
 - Named people / places / orgs: always use `mnem_resolve_or_create`, not `mnem_commit`.
 - Connect entities with typed edges: `works_at`, `lives_in`, `has_preference`,
   `extracted_from`, `revoked_by`, `traveling_with`, `happened_before`, `mentions`.
-- Use `mnem_commit_relation` when both endpoints are named entities.
+- Use `mnem_commit_relation` when both endpoints are named entities. Then also call
+  `mnem_commit` with a standalone summary sentence —
+  entity nodes have no summary and are invisible to text search otherwise.
 - Only commit facts the user stated or confirmed — never your reasoning or drafts.
 - Set `agent_id` to `"cursor"` on every write call.
 
@@ -1694,9 +1721,7 @@ fn windows_hook_script_content(mnem_bin: &str) -> String {
          $json = $input | Out-String | ConvertFrom-Json\n\
          if ($json.prompt) {{\n\
          \x20\x20& '{safe_bin}' retrieve $json.prompt 2>$null\n\
-         \x20\x20if ($LASTEXITCODE -ne 0) {{\n\
-         \x20\x20\x20\x20& '{safe_bin}' global retrieve $json.prompt 2>$null\n\
-         \x20\x20}}\n\
+         \x20\x20& '{safe_bin}' global retrieve $json.prompt 2>$null\n\
          }}\n"
     )
 }
@@ -1722,7 +1747,7 @@ fn pre_prompt_hook_command(_mnem_bin: &str) -> String {
         format!(
             "bash -c 'p=$(jq -r .prompt 2>/dev/null); \
              if [ -n \"$p\" ] && [ \"$p\" != \"null\" ]; then \
-             \"{}\" retrieve \"$p\" 2>/dev/null || \
+             \"{}\" retrieve \"$p\" 2>/dev/null; \
              \"{}\" global retrieve \"$p\" 2>/dev/null; fi'",
             _mnem_bin.replace('"', "\\\""),
             _mnem_bin.replace('"', "\\\"")
@@ -1745,11 +1770,58 @@ fn user_prompt_hook_value() -> Value {
     })
 }
 
+/// When running inside WSL, convert a native Linux path to its Windows UNC
+/// equivalent via `wslpath -w`.  Returns `None` on non-Linux platforms,
+/// non-WSL Linux kernels, or when `wslpath` is unavailable.
+fn wsl_to_windows_path(path: &Path) -> Option<String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        None
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let osrelease = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .unwrap_or_default();
+        if !osrelease.to_ascii_lowercase().contains("microsoft") {
+            return None;
+        }
+        let out = std::process::Command::new("wslpath")
+            .arg("-w")
+            .arg(path)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8(out.stdout)
+            .ok()
+            .map(|s| s.trim().to_string())
+    }
+}
+
 fn mnem_server_value(target: &Path) -> Value {
-    json!({
+    // Propagate MNEM_GLOBAL_DIR into the MCP server environment block so
+    // that the server process resolves the global graph correctly when CLI
+    // and MCP server run in different OS contexts (e.g. WSL CLI + Windows
+    // host).  On WSL we convert the Linux path to the Windows UNC form
+    // (\\wsl.localhost\<distro>\...) so the Windows host can open it.
+    // A manually-set MNEM_GLOBAL_DIR in the current environment is always
+    // preferred and propagated as-is.
+    let global_env: Option<String> = std::env::var("MNEM_GLOBAL_DIR")
+        .ok()
+        .or_else(|| wsl_to_windows_path(&crate::global::default_dir()));
+
+    let mut v = json!({
         "command": resolve_mnem_mcp_command(),
         "args": ["mcp", "--repo", target.to_string_lossy()]
-    })
+    });
+    if let Some(dir) = global_env {
+        v.as_object_mut()
+            .expect("json object")
+            .insert("env".to_string(), json!({ "MNEM_GLOBAL_DIR": dir }));
+    }
+    v
 }
 
 fn zed_server_value(target: &Path) -> Value {

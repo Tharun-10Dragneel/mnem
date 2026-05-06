@@ -74,7 +74,7 @@ unicode-segmentation = "1.12"
 # Pure-Rust PDF text extraction; no C deps, always on.
 pdf-extract          = "0.7"
 # Advanced PDF fallback (optional, feature-gated).
-pdfium-render        = { version = "0.8", optional = true }
+pdfium-render        = { version = "0.9", optional = true }
 # Verb-window regex for proximity-relation promotion (acts_on detection).
 regex                = "1.10"
 # Optional HTTP client for the Ollama extractor (Phase-B5e, feature `ollama`).
@@ -100,4 +100,4 @@ mnem-core-testutils  = { workspace = true }
 # HTTP mock server used by the `ollama` feature tests to simulate a local
 # Ollama endpoint without a live process. `blocking` mirrors the reqwest
 # client feature set the crate uses in production.
-httpmock             = "0.7"
+httpmock             = "0.8"

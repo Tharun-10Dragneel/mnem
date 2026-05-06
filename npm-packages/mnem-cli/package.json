@@ -1,6 +1,6 @@
 {
   "name": "mnem-cli",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Git for knowledge graphs - versioned, content-addressed, embeddable agent memory",
   "author": "mnem contributors",
   "license": "Apache-2.0",
@@ -19,7 +19,7 @@
     "ai"
   ],
   "bin": {
-    "mnem": "./bin/mnem.js"
+    "mnem": "bin/mnem.js"
   },
   "os": [
     "darwin",
@@ -47,4 +47,3 @@
     "node": ">=18"
   }
 }
-
