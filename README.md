@@ -12,6 +12,12 @@
 
 </div>
 
+<div align="center">
+
+[English](README.md) &nbsp;·&nbsp; [中文](README.zh-CN.md) &nbsp;·&nbsp; [Español](README.es.md)
+
+</div>
+
 <hr>
 
 <div align="center">
