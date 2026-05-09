@@ -15,7 +15,6 @@ mdBook-rendered manual.
 - [MCP server](./src/mcp.md)
 - [Core concepts](./src/core-concepts.md)
 - [Configuration](./src/configuration.md)
-- [Architecture](./src/architecture/overview.md)
 - [Benchmarks methodology](./src/benchmarks/methodology.md)
 - [Guides](./src/guides/)
 - [Migrations](./src/migrations/)
