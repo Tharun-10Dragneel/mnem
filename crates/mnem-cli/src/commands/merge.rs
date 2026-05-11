@@ -277,15 +277,18 @@ fn advance_ref(
     target: Cid,
 ) -> Result<()> {
     let prev = r.view().refs.get(ref_name).cloned();
-    let new = RefTarget::normal(target);
-    let _ = r
-        .update_ref(
-            ref_name,
-            prev.as_ref(),
-            Some(new),
-            &config::author_string(cfg),
-        )
+    let new = RefTarget::normal(target.clone());
+    let author = config::author_string(cfg);
+    let r2 = r
+        .update_ref(ref_name, prev.as_ref(), Some(new), &author)
         .context("advancing ref")?;
+    // Also advance view.heads so that the next `open_all` sees the merge
+    // commit as the active HEAD (not the pre-merge commit the old view
+    // referenced). Without this, commands like `mnem get <id>` would still
+    // look up nodes from the old pre-merge commit tree.
+    let _ = r2
+        .update_heads(target, &author)
+        .context("advancing HEAD after ref update")?;
     Ok(())
 }
 
@@ -372,42 +375,49 @@ fn run_continue(data_dir: &Path, override_path: Option<&Path>) -> Result<()> {
     // The current merge engine applies one strategy to all conflicts;
     // per-conflict resolution is not yet supported. If picks are mixed,
     // reject with a helpful error rather than silently discarding picks.
-    let all_ours = mc
-        .conflicts
-        .iter()
-        .all(|c| c.resolution.as_deref() == Some("ours"));
-    let all_theirs = mc
-        .conflicts
-        .iter()
-        .all(|c| c.resolution.as_deref() == Some("theirs"));
-    let strategy = if all_theirs {
-        MergeStrategy::Theirs
-    } else if all_ours {
-        MergeStrategy::Ours
-    } else if mc.conflicts.is_empty() {
-        // No conflicts at all - file was empty or all entries were resolved
-        // before this path; treat as a clean-merge continuation with Ours.
+    //
+    // Check the empty case first: Iterator::all() on an empty iterator
+    // returns true vacuously, which would make both all_ours and all_theirs
+    // true simultaneously for an empty conflicts list, causing all_theirs to
+    // win the if-chain below — wrong. An empty conflicts list means the file
+    // was already clean (or fully resolved before this path); treat it as a
+    // clean-merge continuation with Ours.
+    let strategy = if mc.conflicts.is_empty() {
         MergeStrategy::Ours
     } else {
-        // Mixed picks: the merge engine applies one strategy globally.
-        // Tell the user to make picks consistent.
-        let ours_count = mc
+        let all_ours = mc
             .conflicts
             .iter()
-            .filter(|c| c.resolution.as_deref() == Some("ours"))
-            .count();
-        let theirs_count = mc
+            .all(|c| c.resolution.as_deref() == Some("ours"));
+        let all_theirs = mc
             .conflicts
             .iter()
-            .filter(|c| c.resolution.as_deref() == Some("theirs"))
-            .count();
-        bail!(
-            "mixed resolutions: {ours_count} conflict(s) set to \"ours\" and \
-             {theirs_count} set to \"theirs\". The current merge engine applies \
-             one strategy to all conflicts. Set every `\"resolution\"` to \
-             the same value (all `\"ours\"` or all `\"theirs\"`), then re-run \
-             `mnem merge --continue`."
-        );
+            .all(|c| c.resolution.as_deref() == Some("theirs"));
+        if all_theirs {
+            MergeStrategy::Theirs
+        } else if all_ours {
+            MergeStrategy::Ours
+        } else {
+            // Mixed picks: the merge engine applies one strategy globally.
+            // Tell the user to make picks consistent.
+            let ours_count = mc
+                .conflicts
+                .iter()
+                .filter(|c| c.resolution.as_deref() == Some("ours"))
+                .count();
+            let theirs_count = mc
+                .conflicts
+                .iter()
+                .filter(|c| c.resolution.as_deref() == Some("theirs"))
+                .count();
+            bail!(
+                "mixed resolutions: {ours_count} conflict(s) set to \"ours\" and \
+                 {theirs_count} set to \"theirs\". The current merge engine applies \
+                 one strategy to all conflicts. Set every `\"resolution\"` to \
+                 the same value (all `\"ours\"` or all `\"theirs\"`), then re-run \
+                 `mnem merge --continue`."
+            );
+        }
     };
 
     // Read left/right from the markers on disk.

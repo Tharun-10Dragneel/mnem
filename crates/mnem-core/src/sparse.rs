@@ -143,6 +143,41 @@ impl SparseEmbed {
         }
     }
 
+    /// Validate the two invariants that [`SparseEmbed::new`] enforces at
+    /// construction time:
+    ///
+    /// 1. `indices.len() == values.len()` (aligned parallel arrays)
+    /// 2. `indices` is strictly ascending (no duplicates, no out-of-order)
+    ///
+    /// Call this after deserialising from untrusted bytes (e.g. IPLD round-
+    /// trips from a pre-G17 `extra["sparse_embed"]` node) to catch corrupt
+    /// data before it reaches the sparse sidecar.
+    ///
+    /// # Errors
+    ///
+    /// Returns a descriptive `String` (via `Err(String)`) if either
+    /// invariant is violated so callers can surface the message in a
+    /// warning without pulling in a new error type.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.indices.len() != self.values.len() {
+            return Err(format!(
+                "SparseEmbed invariant violated: indices.len() {} != values.len() {}",
+                self.indices.len(),
+                self.values.len()
+            ));
+        }
+        for w in self.indices.windows(2) {
+            if w[0] >= w[1] {
+                return Err(format!(
+                    "SparseEmbed invariant violated: indices must be strictly ascending; \
+                     saw {} then {}",
+                    w[0], w[1]
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Number of non-zero entries.
     #[must_use]
     pub const fn nnz(&self) -> usize {
@@ -353,5 +388,45 @@ mod tests {
         let e = MockSparseEncoder::default();
         let emb = e.encode("hello").unwrap();
         assert_eq!(emb.vocab_id, e.vocab_id());
+    }
+
+    // --- SparseEmbed::validate() unit tests ---
+
+    #[test]
+    fn validate_ok_on_valid_sparse_embed() {
+        let se = SparseEmbed::new(vec![10, 42, 99], vec![0.8, 0.5, 0.2], "vocab").unwrap();
+        assert!(se.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_non_ascending_indices() {
+        // Construct via new() with valid data, then corrupt indices in place.
+        // SparseEmbed fields are pub so direct assignment compiles fine.
+        let mut se = SparseEmbed::new(vec![10, 42, 99], vec![0.8, 0.5, 0.2], "vocab").unwrap();
+        se.indices = vec![99, 10, 42]; // non-ascending -- invalid
+        assert!(
+            se.validate().is_err(),
+            "validate() must reject non-ascending indices"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_indices() {
+        let mut se = SparseEmbed::new(vec![10, 42, 99], vec![0.8, 0.5, 0.2], "vocab").unwrap();
+        se.indices = vec![10, 10, 99]; // duplicate 10 -- not strictly ascending
+        assert!(
+            se.validate().is_err(),
+            "validate() must reject duplicate indices"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mismatched_lengths() {
+        let mut se = SparseEmbed::new(vec![10, 42, 99], vec![0.8, 0.5, 0.2], "vocab").unwrap();
+        se.values.push(0.1); // one extra value -- length mismatch
+        assert!(
+            se.validate().is_err(),
+            "validate() must reject mismatched indices/values lengths"
+        );
     }
 }

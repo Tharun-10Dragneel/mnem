@@ -639,6 +639,50 @@ mod tests {
         );
     }
 
+    // ---- edge_delta_json: Changed branch ----
+    //
+    // DiffEntry::Changed for edges is ARCHITECTURALLY UNREACHABLE through the
+    // CLI because `add edge` always generates a fresh EdgeId (UUID-v7), so the
+    // same prolly key can never appear in two different commits with two
+    // different value CIDs.  The only way to exercise the Changed arm is to
+    // call edge_delta_json directly with a synthetic DiffEntry::Changed.
+
+    #[test]
+    fn edge_delta_json_changed_entry_produces_changed_delta() {
+        let bs = MemoryBlockstore::new();
+        let src = NodeId::from_bytes_raw([0xA0u8; 16]);
+        let dst = NodeId::from_bytes_raw([0xB0u8; 16]);
+
+        // "Before" edge: label "old_label"
+        let edge_before = Edge::new(EdgeId::from_bytes_raw([0x01u8; 16]), "old_label", src, dst);
+        let cid_before = store_edge(&bs, &edge_before);
+
+        // "After" edge: same logical edge but label changed to "new_label"
+        let edge_after = Edge::new(EdgeId::from_bytes_raw([0x01u8; 16]), "new_label", src, dst);
+        let cid_after = store_edge(&bs, &edge_after);
+
+        let entry = DiffEntry::Changed {
+            key: test_key(1),
+            before: cid_before,
+            after: cid_after,
+        };
+
+        let delta = edge_delta_json(&bs, &entry).expect("Changed edge must produce a delta");
+
+        assert_eq!(delta.delta_type, "changed", "delta_type must be 'changed'");
+        assert_eq!(delta.label, "new_label", "label must reflect the after state");
+        assert_eq!(delta.src, src.to_string(), "src must match");
+        assert_eq!(delta.dst, dst.to_string(), "dst must match");
+
+        let before_state = delta.before.expect("Changed delta must have a before state");
+        assert_eq!(
+            before_state.label, "old_label",
+            "before.label must reflect the before state"
+        );
+        assert_eq!(before_state.src, src.to_string(), "before.src must match");
+        assert_eq!(before_state.dst, dst.to_string(), "before.dst must match");
+    }
+
     // ---- prolly_diff wiring smoke test ----
     //
     // Verifies that a node added between two commits appears as a single

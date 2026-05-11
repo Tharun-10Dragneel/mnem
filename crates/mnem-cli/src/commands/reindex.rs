@@ -544,6 +544,13 @@ fn run_lift_legacy_sparse(
             }
         };
 
+        // Idempotency: skip nodes whose sidecar already carries this vocab_id.
+        // This makes a second `--lift-legacy-sparse` run a true no-op (no new
+        // commit) rather than writing identical bytes again.
+        if r.sparse_for(&node_cid, &se.vocab_id)?.is_some() {
+            continue;
+        }
+
         legacy_count += 1;
         to_lift.push((node_cid, se));
     }
@@ -594,13 +601,18 @@ fn run_lift_legacy_sparse(
 
 /// Decode a [`SparseEmbed`] from an [`Ipld`] value that was serialized
 /// via DAG-CBOR (the pre-G17 on-wire format for `node.sparse_embed`).
-/// Re-encodes the `Ipld` to bytes and decodes as `SparseEmbed`.
+/// Re-encodes the `Ipld` to bytes, decodes as `SparseEmbed`, then calls
+/// [`SparseEmbed::validate`] to catch corrupt data (non-ascending indices
+/// or mismatched `indices.len() != values.len()`) before it reaches the
+/// sidecar.
 fn decode_sparse_embed_from_ipld(val: &Ipld) -> Result<mnem_core::sparse::SparseEmbed> {
     use mnem_core::codec::{from_canonical_bytes, to_canonical_bytes};
     let bytes = to_canonical_bytes(val)
         .map_err(|e| anyhow!("CBOR re-encode of extra[\"sparse_embed\"] failed: {e}"))?;
     let se: mnem_core::sparse::SparseEmbed = from_canonical_bytes(&bytes)
         .map_err(|e| anyhow!("decode of extra[\"sparse_embed\"] as SparseEmbed failed: {e}"))?;
+    se.validate()
+        .map_err(|e| anyhow!("extra[\"sparse_embed\"] SparseEmbed invariant violated: {e}"))?;
     Ok(se)
 }
 

@@ -84,9 +84,17 @@ pub(crate) fn run(override_path: Option<&Path>, args: SwitchArgs) -> Result<()> 
         }
     };
 
-    // Check if HEAD is already at this branch's tip.
+    // Check if HEAD is already at this branch's tip AND active_branch
+    // already points at this exact ref.  Both conditions must hold for
+    // this to be a true no-op; if the CIDs match but the active_branch
+    // field still names a different ref (e.g. two branches at the same
+    // commit CID), we fall through and update active_branch via
+    // switch_branch so that subsequent commits advance the correct ref.
     let current_head = r.view().heads.first().cloned();
-    if current_head.as_ref() == Some(&branch_tip) {
+    let current_active_ref = r.view().active_branch().map(str::to_string);
+    if current_head.as_ref() == Some(&branch_tip)
+        && current_active_ref.as_deref() == Some(full_ref.as_str())
+    {
         println!("Already on '{name}'");
         return Ok(());
     }

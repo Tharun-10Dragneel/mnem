@@ -135,9 +135,23 @@ pub fn all_tools(allow_labels: bool) -> Vec<ToolDef> {
         },
         ToolDef {
             name: "mnem_schema",
-            description: "List every node label present in the current commit, \
-                          along with the property names the IndexSet has built for each label. \
-                          Agents use this to write well-scoped queries.",
+            description: "Inspect the schema of the current commit. Returns: \
+                          (1) node labels with the indexed property names used for \
+                          resolve_or_create deduplication; \
+                          (2) edge types (relationship predicates such as works_at, knows) \
+                          enumerated from the outgoing adjacency index — populated \
+                          automatically when edges are committed via mnem_commit_relation; \
+                          if the index is absent on an older repo, run `mnem embed --reindex` \
+                          to rebuild it; outputs '(index not built)' when absent; \
+                          when the index exists but contains no edge entries (e.g. after all \
+                          edges were deleted and --reindex was run on a node-only repo), \
+                          outputs '<none — index present but contains no edges>'; \
+                          (3) whether the outgoing and incoming adjacency indexes are present. \
+                          On an empty repo (before the first commit) returns a single-line \
+                          message: 'schema: <no IndexSet on current commit>'. \
+                          This tool is available via MCP only; there is no HTTP equivalent. \
+                          Use this before writing queries or traversals to discover what \
+                          node labels and edge predicates exist in the graph.",
             input_schema: json!({
                 "type": "object",
                 "properties": {},

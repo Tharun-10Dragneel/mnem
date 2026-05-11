@@ -274,6 +274,75 @@ fn build_merge_commit(
     Ok(Some(cid))
 }
 
+/// Build a merge Commit from pre-computed node and edge Prolly-tree roots.
+///
+/// This is the strategy-aware counterpart to [`build_merge_commit`]. Whereas
+/// [`build_merge_commit`] calls `union_prolly_trees` internally (which always
+/// picks the CID-lex-max on conflict), the caller of this function has already
+/// resolved conflicts via [`strategy_union_prolly_trees`] and passes in the
+/// resulting roots directly. The rest of the bookkeeping (schema, indexes,
+/// ChangeId, parents) is identical to `build_merge_commit`.
+fn build_merge_commit_from_trees(
+    bs: &dyn Blockstore,
+    left_cid: Cid,
+    right_cid: Cid,
+    left_commit: &Commit,
+    right_commit: &Commit,
+    merged_nodes: Cid,
+    merged_edges: Cid,
+) -> Result<Cid, Error> {
+    // Deterministic schema: inherit from the alphabetically-lowest parent CID.
+    let merged_schema = if left_cid <= right_cid {
+        left_commit.schema.clone()
+    } else {
+        right_commit.schema.clone()
+    };
+
+    // Secondary indexes.
+    let mut reused_indexes: Option<Cid> = None;
+    for (parent_commit, _parent_cid) in [
+        (left_commit, &left_cid),
+        (right_commit, &right_cid),
+    ] {
+        if parent_commit.nodes == merged_nodes
+            && parent_commit.edges == merged_edges
+            && let Some(idx) = &parent_commit.indexes
+        {
+            reused_indexes = Some(idx.clone());
+            break;
+        }
+    }
+    let merged_indexes = match reused_indexes {
+        Some(cid) => cid,
+        None => index::build_index_set(bs, &merged_nodes, &merged_edges)?,
+    };
+
+    let merge_time = left_commit.time.max(right_commit.time) + 1;
+
+    // Sort parent CIDs for determinism.
+    let mut parent_cids = vec![left_cid.clone(), right_cid.clone()];
+    parent_cids.sort();
+    let change_id = deterministic_change_id(&parent_cids);
+
+    let mut commit = Commit::new(
+        change_id,
+        merged_nodes,
+        merged_edges,
+        merged_schema,
+        MERGE_AUTHOR,
+        merge_time,
+        MERGE_COMMIT_MESSAGE,
+    );
+    commit.indexes = Some(merged_indexes);
+    for p in parent_cids {
+        commit = commit.with_parent(p);
+    }
+    let (bytes, cid) = hash_to_cid(&commit)?;
+    // safety: cid computed above via hash_to_cid
+    bs.put_trusted(cid.clone(), bytes)?;
+    Ok(cid)
+}
+
 /// Union of N Prolly trees keyed by 16-byte `ProllyKey`. On key
 /// collision the entry from the alphabetically-largest root CID wins.
 /// Outcome of a multi-tree union: merged Prolly root plus the set of
@@ -314,6 +383,79 @@ fn union_prolly_trees(bs: &dyn Blockstore, roots: &[&Cid]) -> Result<UnionOutcom
             merged.insert(k, winner);
         } else {
             merged.insert(k, values.into_iter().next().expect("len == 1"));
+        }
+    }
+
+    let root = prolly::build_tree(bs, merged)?;
+    Ok(UnionOutcome { root, conflicts })
+}
+
+/// Merge two Prolly trees with an explicit strategy for conflict keys.
+///
+/// For non-conflicting keys the result is the union (same as
+/// [`union_prolly_trees`]). For keys where `left_root` and `right_root`
+/// carry different CIDs the winner is determined by `strategy`:
+///
+/// - [`MergeStrategy::Ours`]   → left CID wins  (current-branch side)
+/// - [`MergeStrategy::Theirs`] → right CID wins (incoming-branch side)
+/// - [`MergeStrategy::Manual`] → falls back to CID-lex-max (same as
+///   the unguided union); callers are expected to gate on `Manual`
+///   before reaching this function.
+fn strategy_union_prolly_trees(
+    bs: &dyn Blockstore,
+    left_root: &Cid,
+    right_root: &Cid,
+    strategy: MergeStrategy,
+) -> Result<UnionOutcome, Error> {
+    // Walk both trees independently (preserving left / right identity).
+    let mut left_map: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+    let cursor_l = Cursor::new(bs, left_root)?;
+    for entry in cursor_l {
+        let (k, v) = entry?;
+        left_map.insert(k, v);
+    }
+
+    let mut right_map: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+    let cursor_r = Cursor::new(bs, right_root)?;
+    for entry in cursor_r {
+        let (k, v) = entry?;
+        right_map.insert(k, v);
+    }
+
+    let all_keys: BTreeSet<ProllyKey> = left_map.keys().chain(right_map.keys()).cloned().collect();
+
+    let mut merged: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+    let mut conflicts: BTreeMap<ProllyKey, Vec<Cid>> = BTreeMap::new();
+
+    for k in all_keys {
+        match (left_map.get(&k), right_map.get(&k)) {
+            (Some(l), Some(r)) if l == r => {
+                // No divergence: both sides agree.
+                merged.insert(k, l.clone());
+            }
+            (Some(l), Some(r)) => {
+                // Conflict: pick the side dictated by strategy.
+                let winner = match strategy {
+                    MergeStrategy::Ours => l.clone(),
+                    MergeStrategy::Theirs => r.clone(),
+                    MergeStrategy::Manual => {
+                        // Deterministic fallback: lex-max (same as union_prolly_trees).
+                        if l >= r { l.clone() } else { r.clone() }
+                    }
+                };
+                let mut candidates = vec![l.clone(), r.clone()];
+                candidates.sort();
+                candidates.dedup();
+                conflicts.insert(k, candidates);
+                merged.insert(k, winner);
+            }
+            (Some(l), None) => {
+                merged.insert(k, l.clone());
+            }
+            (None, Some(r)) => {
+                merged.insert(k, r.clone());
+            }
+            (None, None) => unreachable!("key came from one of the two maps"),
         }
     }
 
@@ -626,21 +768,65 @@ pub fn merge_three_way(
         ConflictPolicy::default(),
     )?;
 
-    // Manual strategy: conflicts short-circuit.
+    // Manual strategy: conflicts short-circuit without touching the blockstore.
     if !mc.conflicts.is_empty() && matches!(strategy, MergeStrategy::Manual) {
         return Ok(MergeOutcome::Conflicts(mc));
     }
 
-    // Clean (or auto-resolved) path: build the merge commit.
-    // Load commits and adapt the existing `build_merge_commit` shape:
-    // it expects a `&[Option<(Cid, Commit)>]`, so wrap both sides.
-    let head_commits: Vec<Option<(Cid, Commit)>> = vec![
-        Some((left.clone(), left_commit)),
-        Some((right.clone(), right_commit)),
-    ];
+    // Auto-resolve path (Ours / Theirs) or clean-merge path (no conflicts).
+    //
+    // When conflicts exist and the strategy is Ours or Theirs, we must
+    // build the merged Prolly trees using the strategy-aware picker so
+    // that the two strategies produce DIFFERENT merged trees (and thus
+    // different merge-commit CIDs). The plain `union_prolly_trees` always
+    // picks the CID-lex-max winner, making Ours and Theirs byte-identical
+    // — that is the bug this branch fixes.
+    //
+    // For a clean merge (no conflicts) both paths produce identical output,
+    // so we always use the strategy-aware function for simplicity.
+    let merge_cid = if !matches!(strategy, MergeStrategy::Manual)
+        && (!mc.conflicts.is_empty() || left_commit.nodes != right_commit.nodes
+            || left_commit.edges != right_commit.edges)
+    {
+        // Build strategy-resolved node and edge trees.
+        let node_outcome = strategy_union_prolly_trees(
+            &**bs,
+            &left_commit.nodes,
+            &right_commit.nodes,
+            strategy,
+        )?;
+        let edge_outcome = strategy_union_prolly_trees(
+            &**bs,
+            &left_commit.edges,
+            &right_commit.edges,
+            strategy,
+        )?;
 
-    let merge_cid = build_merge_commit(&**bs, &head_commits)?
-        .ok_or_else(|| Error::from(RepoError::NoCommonAncestor))?;
+        build_merge_commit_from_trees(
+            &**bs,
+            left.clone(),
+            right.clone(),
+            &left_commit,
+            &right_commit,
+            node_outcome.root,
+            edge_outcome.root,
+        )?
+    } else {
+        // Fallback path: fires when either
+        //   (a) strategy == Manual with no conflicts (the Conflicts early-return
+        //       above has already handled the non-empty Manual case), or
+        //   (b) strategy == Ours/Theirs but both node AND edge tree roots are
+        //       byte-identical across left and right (no divergence at all, so
+        //       the strategy-aware picker would produce the same result as the
+        //       standard union anyway).
+        // In both cases the standard build_merge_commit path is correct.
+        let head_commits: Vec<Option<(Cid, Commit)>> = vec![
+            Some((left.clone(), left_commit)),
+            Some((right.clone(), right_commit)),
+        ];
+        build_merge_commit(&**bs, &head_commits)?
+            .ok_or_else(|| Error::from(RepoError::NoCommonAncestor))?
+    };
 
     Ok(MergeOutcome::Clean(merge_cid))
 }
@@ -1347,5 +1533,108 @@ mod tests {
             }
             other => panic!("expected Conflicted, got {other:?}"),
         }
+    }
+
+    // ---- strategy_union_prolly_trees ----
+
+    #[test]
+    fn strategy_union_prolly_trees_ours_vs_theirs_picks_correct_side() {
+        use crate::store::MemoryBlockstore;
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+
+        // Build a MemoryBlockstore and seed two minimal Prolly trees that
+        // each contain the same key but different value CIDs.
+        let bs: Arc<dyn crate::store::Blockstore> = Arc::new(MemoryBlockstore::new());
+
+        // Shared (conflicting) key.
+        let conflict_key = ProllyKey::new([0x01u8; 16]);
+        // Key that only exists in one side (non-conflicting) to verify
+        // union-of-unique-keys still works alongside the conflict resolution.
+        let left_only_key = ProllyKey::new([0x10u8; 16]);
+        let right_only_key = ProllyKey::new([0x20u8; 16]);
+
+        // Distinct value CIDs for the conflicting key.
+        let left_value = raw_cid(1001);
+        let right_value = raw_cid(1002);
+
+        // Build LEFT tree: conflict_key -> left_value, left_only_key -> some_cid.
+        let mut left_entries: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+        left_entries.insert(conflict_key, left_value.clone());
+        left_entries.insert(left_only_key, raw_cid(2001));
+        let left_root = prolly::build_tree(&*bs, left_entries).expect("build left tree");
+
+        // Build RIGHT tree: conflict_key -> right_value, right_only_key -> some_cid.
+        let mut right_entries: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+        right_entries.insert(conflict_key, right_value.clone());
+        right_entries.insert(right_only_key, raw_cid(2002));
+        let right_root = prolly::build_tree(&*bs, right_entries).expect("build right tree");
+
+        // strategy = Ours  →  left CID must win for the conflicting key.
+        let ours_outcome =
+            strategy_union_prolly_trees(&*bs, &left_root, &right_root, MergeStrategy::Ours)
+                .expect("strategy_union Ours");
+        let ours_root = ours_outcome.root;
+
+        // strategy = Theirs  →  right CID must win for the conflicting key.
+        let theirs_outcome =
+            strategy_union_prolly_trees(&*bs, &left_root, &right_root, MergeStrategy::Theirs)
+                .expect("strategy_union Theirs");
+        let theirs_root = theirs_outcome.root;
+
+        // The two strategies produce DIFFERENT merged trees.
+        assert_ne!(
+            ours_root, theirs_root,
+            "Ours and Theirs strategies must produce different Prolly roots"
+        );
+
+        // Read back the merged tree contents and verify the conflict key.
+        let ours_map: BTreeMap<ProllyKey, Cid> = {
+            let cursor = prolly::Cursor::new(&*bs, &ours_root).expect("cursor ours");
+            cursor.map(|e| e.expect("entry")).collect()
+        };
+        let theirs_map: BTreeMap<ProllyKey, Cid> = {
+            let cursor = prolly::Cursor::new(&*bs, &theirs_root).expect("cursor theirs");
+            cursor.map(|e| e.expect("entry")).collect()
+        };
+
+        assert_eq!(
+            ours_map.get(&conflict_key),
+            Some(&left_value),
+            "Ours strategy: conflicting key must map to left (our) CID"
+        );
+        assert_eq!(
+            theirs_map.get(&conflict_key),
+            Some(&right_value),
+            "Theirs strategy: conflicting key must map to right (their) CID"
+        );
+
+        // Non-conflicting keys survive in both merged trees.
+        assert!(
+            ours_map.contains_key(&left_only_key),
+            "left-only key must survive in Ours merge"
+        );
+        assert!(
+            ours_map.contains_key(&right_only_key),
+            "right-only key must survive in Ours merge"
+        );
+        assert!(
+            theirs_map.contains_key(&left_only_key),
+            "left-only key must survive in Theirs merge"
+        );
+        assert!(
+            theirs_map.contains_key(&right_only_key),
+            "right-only key must survive in Theirs merge"
+        );
+
+        // Both outcomes report the conflict.
+        assert!(
+            ours_outcome.conflicts.contains_key(&conflict_key),
+            "conflict key must appear in UnionOutcome::conflicts for Ours"
+        );
+        assert!(
+            theirs_outcome.conflicts.contains_key(&conflict_key),
+            "conflict key must appear in UnionOutcome::conflicts for Theirs"
+        );
     }
 }
