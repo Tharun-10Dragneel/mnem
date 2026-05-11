@@ -397,6 +397,36 @@ class Repo:
         """
         ...
 
+    def embedding_for(self, node_id: str, model: str) -> list[float] | None:
+        """Look up the embedding vector for a node by UUID and model string.
+
+        Returns ``None`` when the node does not exist, the repo has no
+        embedding sidecar, or the sidecar has no entry for the requested
+        model.  On success, returns the vector as a list of floats decoded
+        from the little-endian f32 bytes stored in the sidecar.
+
+        :param node_id: Canonical UUID string of the node.
+        :param model: Model identifier (e.g. ``"onnx:all-MiniLM-L6-v2"``).
+        :returns: Vector as ``list[float]``, or ``None`` if not found.
+        :raises ValueError: On a malformed UUID.
+        :raises MnemError: On store or codec failure.
+        """
+        ...
+
+    def has_embedding(self, node_id: str, model: str) -> bool:
+        """Return ``True`` if an embedding for *model* exists on the node.
+
+        Equivalent to ``embedding_for(node_id, model) is not None`` but
+        avoids decoding the full vector bytes when only presence is needed.
+
+        :param node_id: Canonical UUID string of the node.
+        :param model: Model identifier (e.g. ``"onnx:all-MiniLM-L6-v2"``).
+        :returns: ``True`` when the embedding exists, ``False`` otherwise.
+        :raises ValueError: On a malformed UUID.
+        :raises MnemError: On store or codec failure.
+        """
+        ...
+
     def retrieve(
         self,
         text: str | None = None,

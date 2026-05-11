@@ -221,18 +221,18 @@ pub(crate) async fn post_node(
 
     // Auto-embed the node's summary (dense + sparse, if configured).
     // Failures warn but do not block the commit; a later `mnem embed`
-    // pass can backfill. Clone `text` up front so the borrow of
-    // `node.summary` ends before we mutate `node` via
-    // `with_sparse_embed`. The dense vector is staged via the
-    // sidecar `Transaction::set_embedding` rather than `with_embed`
-    // so the resulting `NodeCid` does not bake in last-bit ORT
-    // drift and can be deduped across federated peers.
+    // pass can backfill. Dense vectors stage to `Commit.embeddings`
+    // via `Transaction::set_embedding`; sparse vectors stage to
+    // `Commit.sparse` via `Transaction::set_sparse_embedding`.
+    // Neither touches the Node bytes, keeping `NodeCid` stable across
+    // encoder versions and federated peers (G16/G17).
     let text_for_embed: Option<String> = node
         .summary
         .as_ref()
         .filter(|t| !t.trim().is_empty())
         .cloned();
     let mut pending_dense: Option<(String, mnem_core::objects::Embedding)> = None;
+    let mut pending_sparse: Option<(String, mnem_core::sparse::SparseEmbed)> = None;
     if let Some(text) = text_for_embed {
         if let Some(pc) = &s.embed_cfg
             && let Ok(embedder) = mnem_embed_providers::open(pc)
@@ -245,7 +245,7 @@ pub(crate) async fn post_node(
             && let Ok(sparser) = mnem_sparse_providers::open(sc)
             && let Ok(se) = sparser.encode(&text)
         {
-            node = node.with_sparse_embed(se);
+            pending_sparse = Some((sparser.vocab_id().to_string(), se));
         }
         // Silent on failure; the POST path returns an `id` either way.
     }
@@ -256,7 +256,10 @@ pub(crate) async fn post_node(
     let mut tx = guard.start_transaction();
     let cid = tx.add_node(&node)?;
     if let Some((model, emb)) = pending_dense {
-        tx.set_embedding(cid, model, emb)?;
+        tx.set_embedding(cid.clone(), model, emb)?;
+    }
+    if let Some((vocab_id, se)) = pending_sparse {
+        tx.set_sparse_embedding(cid, vocab_id, se)?;
     }
     let commit_start = std::time::Instant::now();
     let new_repo = tx.commit(
@@ -332,6 +335,66 @@ fn model_fq_of(pc: &mnem_embed_providers::ProviderConfig) -> String {
         PC::Ollama(c) => format!("ollama:{}", c.model),
         PC::Onnx(c) => format!("onnx:{}", c.model),
     }
+}
+
+// ---------- GET /v1/nodes/{id}/embedding ----------
+
+/// Query parameters for `GET /v1/nodes/{id}/embedding`.
+#[derive(Deserialize)]
+pub(crate) struct GetNodeEmbeddingQuery {
+    /// Model identifier string (e.g. ``"onnx:all-MiniLM-L6-v2"``).
+    model: String,
+}
+
+/// Fetch the embedding vector for a node by UUID and model string.
+///
+/// Returns `200 OK` with the embedding in the `mnem.v1.node_embedding`
+/// schema, or `404 Not Found` when the node or embedding does not exist.
+pub(crate) async fn get_node_embedding(
+    State(s): State<AppState>,
+    Path(id_str): Path<String>,
+    Query(q): Query<GetNodeEmbeddingQuery>,
+) -> Result<Json<Value>, Error> {
+    let id = NodeId::parse_uuid(&id_str)
+        .map_err(|e| Error::bad_request(format!("invalid UUID: {e}")))?;
+    let repo = s.repo.lock().map_err(|_| Error::locked())?;
+    let node = repo
+        .lookup_node(&id)?
+        .ok_or_else(|| Error::not_found(format!("no node with id={id_str}")))?;
+
+    let (_, node_cid) = mnem_core::codec::hash_to_cid(&node)
+        .map_err(|e| Error::internal(format!("hash node: {e}")))?;
+
+    let emb = repo
+        .embedding_for(&node_cid, &q.model)?
+        .ok_or_else(|| {
+            Error::not_found(format!(
+                "no embedding for model={} on node {}",
+                q.model, id_str
+            ))
+        })?;
+
+    let bytes = emb.vector.as_ref();
+    let vector: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+
+    let dtype_str = match emb.dtype {
+        mnem_core::objects::Dtype::F32 => "f32",
+        mnem_core::objects::Dtype::F16 => "f16",
+        mnem_core::objects::Dtype::F64 => "f64",
+        mnem_core::objects::Dtype::I8 => "i8",
+    };
+
+    Ok(Json(json!({
+        "schema": "mnem.v1.node_embedding",
+        "node_id": id_str,
+        "model": emb.model,
+        "dim": emb.dim,
+        "dtype": dtype_str,
+        "vector": vector,
+    })))
 }
 
 // ---------- DELETE /v1/nodes/{id} ----------
@@ -623,8 +686,11 @@ pub(crate) async fn post_nodes_bulk(
     // Each entry pairs the Node with an optional dense (model, vec)
     // staged for the sidecar-side `Transaction::set_embedding` call
     // that runs after `add_node` returns the NodeCid.
-    let mut built: Vec<(Node, Option<(String, mnem_core::objects::Embedding)>)> =
-        Vec::with_capacity(body.nodes.len());
+    let mut built: Vec<(
+        Node,
+        Option<(String, mnem_core::objects::Embedding)>,
+        Option<(String, mnem_core::sparse::SparseEmbed)>,
+    )> = Vec::with_capacity(body.nodes.len());
     let mut results: Vec<BulkNodeEntry> = Vec::with_capacity(body.nodes.len());
     let mut embedded = 0u32;
     let mut skipped_embed = 0u32;
@@ -659,10 +725,9 @@ pub(crate) async fn post_nodes_bulk(
         if let Some(c) = nb.content {
             node = node.with_content(bytes::Bytes::from(c.into_bytes()));
         }
-        // Clone the summary up front so the borrow ends before the
-        // `with_sparse_embed` mutation. Dense vectors stage to the
-        // sidecar via `Transaction::set_embedding` after the commit
-        // loop knows the NodeCid; we collect them here keyed by
+        // Dense and sparse vectors stage to their respective sidecars via
+        // `Transaction::set_embedding` / `set_sparse_embedding` after the
+        // commit loop knows the NodeCid; we collect both here keyed by
         // position in `built`.
         let text_for_embed: Option<String> = node
             .summary
@@ -670,6 +735,7 @@ pub(crate) async fn post_nodes_bulk(
             .filter(|t| !t.trim().is_empty())
             .cloned();
         let mut pending_dense: Option<(String, mnem_core::objects::Embedding)> = None;
+        let mut pending_sparse_item: Option<(String, mnem_core::sparse::SparseEmbed)> = None;
         if let Some(text) = text_for_embed {
             if let Some(embedder) = embedder.as_ref() {
                 match embedder.embed(&text) {
@@ -686,23 +752,26 @@ pub(crate) async fn post_nodes_bulk(
             if let Some(sparser) = sparser.as_ref()
                 && let Ok(se) = sparser.encode(&text)
             {
-                node = node.with_sparse_embed(se);
+                pending_sparse_item = Some((sparser.vocab_id().to_string(), se));
             }
         }
         results.push(BulkNodeEntry {
             id: node.id.to_uuid_string(),
             label: nb.label,
         });
-        built.push((node, pending_dense));
+        built.push((node, pending_dense, pending_sparse_item));
     }
 
     // Single commit over all nodes. Index rebuild happens once.
     let mut guard = s.repo.lock().map_err(|_| Error::locked())?;
     let mut tx = guard.start_transaction();
-    for (node, pending_dense) in &built {
+    for (node, pending_dense, pending_sparse_item) in &built {
         let cid = tx.add_node(node)?;
         if let Some((model, emb)) = pending_dense {
-            tx.set_embedding(cid, model.clone(), emb.clone())?;
+            tx.set_embedding(cid.clone(), model.clone(), emb.clone())?;
+        }
+        if let Some((vocab_id, se)) = pending_sparse_item {
+            tx.set_sparse_embedding(cid, vocab_id.clone(), se.clone())?;
         }
     }
     let commit_start = std::time::Instant::now();

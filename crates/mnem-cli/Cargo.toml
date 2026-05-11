@@ -152,3 +152,6 @@ indicatif = { version = "0.17", default-features = false }
 # isolated per-test directories.
 assert_cmd = "2.0"
 tempfile = "3.14"
+# reindex_lift_legacy test: directly manipulates the repo to seed a
+# legacy node and then verifies the sidecar via the Rust API.
+serde_ipld_dagcbor = { workspace = true }

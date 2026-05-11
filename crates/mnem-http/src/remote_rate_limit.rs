@@ -279,9 +279,8 @@ mod tests {
 
     #[test]
     fn from_env_uses_defaults_when_vars_absent() {
-        // Ensure env vars are not set (they won't be in CI).
-        std::env::remove_var("MNEM_REMOTE_RATE_PER_SEC");
-        std::env::remove_var("MNEM_REMOTE_RATE_BURST");
+        // These vars won't be set in CI; the test relies on absence of
+        // MNEM_REMOTE_RATE_PER_SEC and MNEM_REMOTE_RATE_BURST.
         let limiter = RemoteRateLimiter::from_env();
         // Capacity should be 50 * 1000 = 50_000 milli-tokens.
         assert_eq!(

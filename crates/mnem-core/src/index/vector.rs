@@ -790,20 +790,20 @@ mod tests {
 
     // ---------- sidecar dual-read ----------
 
-    /// Sidecar is the source of truth: a node added without
-    /// `node.embed` whose vector lives only in the
-    /// `Commit.embeddings` Prolly tree must still surface in the
-    /// index. Verifies `build_from_repo` actually calls
-    /// `embedding_for` rather than only reading `node.embed`.
+    /// Sidecar is the source of truth: a node added without an inline
+    /// embed whose vector lives only in the embedding sidecar
+    /// (`Commit.embeddings`) must still surface in the index. Verifies
+    /// `build_from_repo` calls `embedding_for` rather than any inline
+    /// field.
     #[test]
     fn index_reads_embedding_from_sidecar() {
         let (bs, ohs) = stores();
         let repo = ReadonlyRepo::init(bs, ohs).unwrap();
         let mut tx = repo.start_transaction();
 
-        // Node carries NO inline embed: the only path to retrieval is
-        // the sidecar. If the dual-read regressed and only `node.embed`
-        // is consulted, this test fails with `is_empty()`.
+        // Node carries no inline embed: the only path to retrieval is
+        // the embedding sidecar (`Commit.embeddings`). If the read
+        // regressed, this test fails with `is_empty()`.
         let node = Node::new(NodeId::from_bytes_raw([1u8; 16]), "Doc");
         let node_cid = tx.add_node(&node).unwrap();
         let emb = f32_embed("mA", &[1.0, 0.0, 0.0]);

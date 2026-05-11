@@ -284,4 +284,9 @@ pub enum ObjectError {
         /// Actual vector length.
         got: usize,
     },
+    /// A caller-supplied value failed a precondition check (e.g. an empty
+    /// model string passed to [`crate::repo::Transaction::set_embedding`]).
+    /// The message describes the failing invariant.
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }

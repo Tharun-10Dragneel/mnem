@@ -146,6 +146,11 @@ pub fn route_table(metrics_enabled: bool) -> Vec<(&'static str, &'static str, &'
         ),
         ("POST", "/v1/edges", "commit a new directed edge"),
         ("GET/DELETE", "/v1/nodes/{id}", "fetch / delete a node"),
+        (
+            "GET",
+            "/v1/nodes/{id}/embedding",
+            "fetch embedding vector for a node by model",
+        ),
         ("POST", "/v1/nodes/{id}/tombstone", "tombstone a node"),
         ("GET/POST", "/v1/retrieve", "agent-facing retrieval"),
         (
@@ -305,6 +310,10 @@ pub fn app_with_options(repo_dir: &Path, opts: AppOptions) -> Result<Router> {
         .route(
             "/v1/nodes/{id}",
             get(handlers::get_node).delete(handlers::delete_node),
+        )
+        .route(
+            "/v1/nodes/{id}/embedding",
+            get(handlers::get_node_embedding),
         )
         .route("/v1/nodes/{id}/tombstone", post(handlers::tombstone_node))
         .route(

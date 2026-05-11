@@ -1029,3 +1029,219 @@ async fn post_edge_without_auth_is_401() {
         "no bearer token => 401"
     );
 }
+
+// ---------- GET /v1/nodes/{id}/embedding ----------
+
+/// Build an app and pre-seed it with a node that has an embedding attached
+/// to its sidecar. Returns the router, the node UUID string, and the model
+/// string so the tests can re-use the live embedding.
+///
+/// Seeds data first (before building the app) so the redb exclusive lock
+/// is not held by two openers simultaneously. After seeding, the seeder
+/// drops its file handle and `app_with_options` opens cleanly.
+fn make_app_with_embedding() -> (axum::Router, TempDir, String, String) {
+    use bytes::Bytes;
+    use mnem_core::id::NodeId;
+    use mnem_core::objects::{Dtype, Embedding, Node};
+
+    let td = TempDir::new().expect("tmp dir");
+
+    // --- Seed phase: open the redb, write a node + embedding, then close. ---
+    let data_dir = td.path().join(".mnem");
+    std::fs::create_dir_all(&data_dir).expect("create .mnem");
+    let db_path = data_dir.join("repo.redb");
+
+    let model = "onnx:all-MiniLM-L6-v2".to_string();
+    let node_id_str;
+    {
+        let (bs, ohs, _db) = mnem_backend_redb::open_or_init(&db_path).expect("open redb");
+        let bs_arc: std::sync::Arc<dyn mnem_core::store::Blockstore> = bs;
+        let ohs_arc: std::sync::Arc<dyn mnem_core::store::OpHeadsStore> = ohs;
+
+        let repo = mnem_core::repo::ReadonlyRepo::init(bs_arc.clone(), ohs_arc.clone())
+            .expect("init repo");
+
+        let dim: usize = 384;
+        let vector: Vec<f32> = (0..dim).map(|i| i as f32 / dim as f32).collect();
+        let mut vector_bytes = Vec::with_capacity(dim * 4);
+        for v in &vector {
+            vector_bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let node = Node::new(NodeId::new_v7(), "Memory")
+            .with_summary("test embedding node");
+        node_id_str = node.id.to_uuid_string();
+
+        let emb = Embedding {
+            model: model.clone(),
+            dtype: Dtype::F32,
+            dim: dim as u32,
+            vector: Bytes::from(vector_bytes),
+        };
+
+        let mut tx = repo.start_transaction();
+        let node_cid = tx.add_node(&node).expect("add node");
+        tx.set_embedding(node_cid, model.clone(), emb).expect("set embedding");
+        tx.commit("tests", "seed embedding test").expect("commit");
+        // `_db` (the redb Database handle) is dropped here, releasing the lock.
+    }
+
+    // --- App phase: open the already-seeded redb. ---
+    let opts = mnem_http::AppOptions {
+        allow_labels: Some(true),
+        in_memory: false,
+        metrics_enabled: false,
+        push_token: None,
+    };
+    let app = mnem_http::app_with_options(td.path(), opts).expect("build app");
+
+    (app, td, node_id_str, model)
+}
+
+#[tokio::test]
+async fn get_node_embedding_returns_vector() {
+    let (app, _td, node_id, model) = make_app_with_embedding();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/nodes/{node_id}/embedding?model={model}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "embedding found");
+    let j = to_json(resp.into_body()).await;
+    assert_eq!(j["schema"], "mnem.v1.node_embedding");
+    assert_eq!(j["node_id"], node_id.as_str());
+    assert_eq!(j["model"], model.as_str());
+    assert_eq!(j["dim"], 384);
+    assert_eq!(j["dtype"], "f32");
+    let vec_arr = j["vector"].as_array().expect("vector is array");
+    assert!(!vec_arr.is_empty(), "vector must be non-empty");
+    assert_eq!(vec_arr.len(), 384);
+}
+
+#[tokio::test]
+async fn get_node_embedding_missing_model_is_404() {
+    let (app, _td, node_id, _model) = make_app_with_embedding();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/nodes/{node_id}/embedding?model=nonexistent-model"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "missing model is 404");
+    let j = to_json(resp.into_body()).await;
+    assert_eq!(j["schema"], "mnem.v1.err");
+    assert!(
+        j["error"]
+            .as_str()
+            .unwrap()
+            .contains("no embedding for model=nonexistent-model"),
+        "error message mentions model"
+    );
+}
+
+#[tokio::test]
+async fn get_node_embedding_missing_node_is_404() {
+    let (app, _td) = make_app();
+    let fake_id = "00000000-0000-7000-8000-000000000001";
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/nodes/{fake_id}/embedding?model=some-model"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "missing node is 404");
+    let j = to_json(resp.into_body()).await;
+    assert_eq!(j["schema"], "mnem.v1.err");
+}
+
+/// Regression test for "mnem-http silent-drop fix (long-summary nodes get
+/// dropped on ingest)". Investigation of `handlers.rs` and
+/// `handlers_ingest.rs` shows no truncation or drop path in the
+/// `POST /v1/nodes` handler for large `summary` fields: the summary is
+/// written verbatim via `node.with_summary(sum)` with no size check.
+///
+/// This test pins the correct behaviour: a node with a 10,000-character
+/// summary must be stored and retrieved with the full, untruncated text.
+/// If a future change introduces a size limit or truncation, this test
+/// will break with a clear `summary` mismatch rather than a silent data
+/// loss.
+#[tokio::test]
+async fn long_summary_node_round_trips_without_truncation() {
+    let (app, _td) = make_app();
+
+    // Build a 10,000-character summary: repeating "x" is cheap and
+    // deterministic; any change in the returned byte count is detectable.
+    let long_summary = "x".repeat(10_000);
+
+    let body = serde_json::json!({
+        "label": "Memory",
+        "summary": long_summary,
+        "author": "tests"
+    });
+
+    // POST /v1/nodes - must succeed and return an id.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "POST /v1/nodes with 10k-char summary must succeed"
+    );
+    let j = to_json(resp.into_body()).await;
+    let id = j["id"].as_str().unwrap().to_string();
+
+    // GET /v1/nodes/{id} - must return the full, untruncated summary.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/nodes/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "GET /v1/nodes/{id} must succeed for long-summary node"
+    );
+    let j = to_json(resp.into_body()).await;
+    let returned_summary = j["summary"].as_str().unwrap_or("");
+    assert_eq!(
+        returned_summary.len(),
+        10_000,
+        "retrieved summary must be exactly 10,000 chars (no truncation), got {}",
+        returned_summary.len()
+    );
+    assert_eq!(
+        returned_summary,
+        "x".repeat(10_000),
+        "retrieved summary bytes must be byte-identical to the original"
+    );
+}

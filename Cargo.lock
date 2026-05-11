@@ -2143,6 +2143,7 @@ dependencies = [
  "mnem-rerank-providers",
  "mnem-transport",
  "serde",
+ "serde_ipld_dagcbor",
  "serde_json",
  "tempfile",
  "tokio",

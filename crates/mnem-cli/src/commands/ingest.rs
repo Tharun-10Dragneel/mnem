@@ -422,6 +422,8 @@ pub(crate) fn run(override_path: Option<&Path>, a: Args) -> Result<()> {
                 since: None,
                 dry_run: false,
                 message: None,
+                lift_legacy_extra: false,
+                lift_legacy_sparse: false,
             },
         )?;
     }

@@ -64,6 +64,19 @@ pub struct Commit {
     /// `content_cid`, just with per-machine drift in
     /// `commit.embeddings`.
     pub embeddings: Option<Cid>,
+    /// Optional sparse-embedding sidecar Prolly root. Tree keyed by
+    /// 16-byte truncated blake3 of `NodeCid` wire form, value =
+    /// [`crate::objects::SparseBucket`]. Lifts learned-sparse
+    /// embedding vectors out of `Node` canonical bytes so the Node CID
+    /// stays byte-stable across encoder versions and vocabulary updates.
+    /// `None` on commits that carry no sparse-embedding-bearing nodes.
+    ///
+    /// **Intentionally excluded from `content_cid`.** Same invariant as
+    /// `embeddings`: the content_cid must not be coupled to derived
+    /// bytes. Two machines indexing the same source text with different
+    /// sparse encoder versions share the same `content_cid` even when
+    /// their sparse sidecar CIDs differ.
+    pub sparse: Option<Cid>,
     /// Free-form author identifier.
     pub author: String,
     /// AI agent identifier (when the commit was machine-generated).
@@ -104,6 +117,7 @@ impl Commit {
             delta: None,
             indexes: None,
             embeddings: None,
+            sparse: None,
             author: author.into(),
             agent_id: None,
             task_id: None,
@@ -210,6 +224,10 @@ struct CommitWire {
     /// an embedding sidecar round-trip byte-identically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     embeddings: Option<Cid>,
+    /// `skip_serializing_if` keeps absence-on-encode so commits without
+    /// a sparse sidecar round-trip byte-identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sparse: Option<Cid>,
     author: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_id: Option<String>,
@@ -235,6 +253,7 @@ impl Serialize for Commit {
             delta: self.delta.clone(),
             indexes: self.indexes.clone(),
             embeddings: self.embeddings.clone(),
+            sparse: self.sparse.clone(),
             author: self.author.clone(),
             agent_id: self.agent_id.clone(),
             task_id: self.task_id.clone(),
@@ -266,6 +285,7 @@ impl<'de> Deserialize<'de> for Commit {
             delta: w.delta,
             indexes: w.indexes,
             embeddings: w.embeddings,
+            sparse: w.sparse,
             author: w.author,
             agent_id: w.agent_id,
             task_id: w.task_id,
@@ -414,7 +434,77 @@ mod tests {
         );
     }
 
-    /// `Commit.embeddings: Some(cid)` survives encode → decode →
+    /// Load-bearing invariant: two commits with byte-identical data
+    /// roots but DIFFERENT `sparse` sidecar Cids MUST share
+    /// `content_cid`. If this fails, a future change re-coupled
+    /// `ContentCidPayload` to the sparse sidecar - exactly the
+    /// architectural error this design exists to prevent.
+    #[test]
+    fn content_cid_ignores_sparse_field() {
+        let mut a = sample();
+        a.sparse = Some(raw(100));
+        let mut b = sample();
+        b.sparse = Some(raw(200)); // different sparse sidecar
+        assert_eq!(
+            a.content_cid().unwrap(),
+            b.content_cid().unwrap(),
+            "content_cid MUST ignore the sparse sidecar - that is the G17 contract"
+        );
+
+        // Also: a commit with `sparse = None` and a commit with
+        // `sparse = Some(_)` must share the same content_cid when
+        // every other data root matches.
+        let mut c = sample();
+        c.sparse = None;
+        let mut d = sample();
+        d.sparse = Some(raw(300));
+        assert_eq!(
+            c.content_cid().unwrap(),
+            d.content_cid().unwrap(),
+            "absence of sparse must not change content_cid either"
+        );
+    }
+
+    /// `Commit.sparse: Some(cid)` survives encode to decode to
+    /// re-encode byte-identically. Pins the wire-form contract for
+    /// the new G17 field.
+    #[test]
+    fn commit_with_sparse_some_round_trips() {
+        let mut original = sample();
+        original.sparse = Some(raw(42));
+        let bytes = to_canonical_bytes(&original).unwrap();
+        let decoded: Commit = from_canonical_bytes(&bytes).unwrap();
+        assert_eq!(decoded.sparse, Some(raw(42)));
+        let bytes2 = to_canonical_bytes(&decoded).unwrap();
+        assert_eq!(
+            bytes, bytes2,
+            "round-trip must be byte-identical - wire form is contract-bound"
+        );
+    }
+
+    /// Backwards-compat: a CBOR commit written without the
+    /// `sparse` key must decode cleanly with `sparse = None`
+    /// and re-encode byte-identically.
+    #[test]
+    fn commit_legacy_no_sparse_key_round_trips() {
+        let original = sample();
+        assert_eq!(original.sparse, None);
+        let bytes = to_canonical_bytes(&original).unwrap();
+
+        // Verify the wire form does NOT contain the `sparse` key.
+        assert!(
+            !bytes.windows(b"sparse".len()).any(|w| w == b"sparse"),
+            "wire form must omit the `sparse` key when None"
+        );
+
+        let decoded: Commit = from_canonical_bytes(&bytes).unwrap();
+        assert_eq!(decoded.sparse, None);
+
+        let bytes2 = to_canonical_bytes(&decoded).unwrap();
+        assert_eq!(bytes, bytes2, "legacy CBOR must re-encode byte-identically");
+    }
+
+    /// `Commit.embeddings: Some(cid)` survives encode to decode to
     /// re-encode byte-identically. Pins the wire-form contract for
     /// the new G16 field.
     #[test]
@@ -476,6 +566,7 @@ mod tests {
             delta: None,
             indexes: None,
             embeddings: None,
+            sparse: None,
             author: "x".into(),
             agent_id: None,
             task_id: None,

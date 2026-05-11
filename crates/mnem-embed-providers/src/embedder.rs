@@ -94,7 +94,8 @@ pub trait Embedder: Send + Sync {
 }
 
 /// Convert an embedder's raw `Vec<f32>` output into the on-wire
-/// [`Embedding`] shape that mnem-core writes into `Node.embed`.
+/// [`Embedding`] shape that mnem-core writes into the embedding sidecar
+/// (`Commit.embeddings`).
 ///
 /// Always produces an `f32` little-endian packed `Bytes` with
 /// `dim = v.len()`. The `model` argument should be the fully-qualified

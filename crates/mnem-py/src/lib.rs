@@ -590,6 +590,115 @@ impl Repo {
         Ok(d.into_any().unbind())
     }
 
+    /// Look up the embedding vector for a node by its UUID and model string.
+    ///
+    /// Returns `None` when the node does not exist, the repo has no embedding
+    /// sidecar, or the sidecar has no entry for the requested model. On
+    /// success, returns the vector decoded as a list of f32 values.
+    ///
+    /// Parameters
+    /// ----------
+    /// node_id : str
+    ///     Canonical UUID string of the node.
+    /// model : str
+    ///     Model identifier string (e.g. ``"onnx:all-MiniLM-L6-v2"``).
+    pub fn embedding_for(&self, node_id: &str, model: &str) -> PyResult<Option<Vec<f32>>> {
+        let id = NodeId::parse_uuid(node_id)
+            .map_err(|e| PyValueError::new_err(format!("invalid UUID: {e}")))?;
+        let guard = self.inner.lock().map_err(poison)?;
+        let Some(node) = guard.lookup_node(&id).map_err(map_core_err)? else {
+            return Ok(None);
+        };
+        let (_, node_cid) = mnem_core::codec::hash_to_cid(&node)
+            .map_err(|e| MnemError::new_err(format!("hash node: {e}")))?;
+        let Some(emb) = guard.embedding_for(&node_cid, model).map_err(map_core_err)? else {
+            return Ok(None);
+        };
+        let bytes = emb.vector.as_ref();
+        let floats: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        Ok(Some(floats))
+    }
+
+    /// Return `True` if an embedding for `model` exists on the given node,
+    /// `False` otherwise (including when the node does not exist).
+    ///
+    /// Parameters
+    /// ----------
+    /// node_id : str
+    ///     Canonical UUID string of the node.
+    /// model : str
+    ///     Model identifier string (e.g. ``"onnx:all-MiniLM-L6-v2"``).
+    pub fn has_embedding(&self, node_id: &str, model: &str) -> PyResult<bool> {
+        Ok(self.embedding_for(node_id, model)?.is_some())
+    }
+
+    /// Look up the sparse embedding for a node by its UUID and vocabulary
+    /// identifier.
+    ///
+    /// Returns `None` when the node does not exist, the repo has no sparse
+    /// sidecar, or the sidecar has no entry for the requested vocabulary.
+    /// On success, returns a dict with keys ``"indices"`` (list of int),
+    /// ``"values"`` (list of float), and ``"vocab_id"`` (str).
+    ///
+    /// Parameters
+    /// ----------
+    /// node_id : str
+    ///     Canonical UUID string of the node.
+    /// vocab_id : str
+    ///     Vocabulary identifier (e.g. ``"bert-base-uncased@30522"``).
+    pub fn sparse_for(
+        &self,
+        py: Python<'_>,
+        node_id: &str,
+        vocab_id: &str,
+    ) -> PyResult<Option<Py<PyAny>>> {
+        let id = NodeId::parse_uuid(node_id)
+            .map_err(|e| PyValueError::new_err(format!("invalid UUID: {e}")))?;
+        let guard = self.inner.lock().map_err(poison)?;
+        let Some(node) = guard.lookup_node(&id).map_err(map_core_err)? else {
+            return Ok(None);
+        };
+        let (_, node_cid) = mnem_core::codec::hash_to_cid(&node)
+            .map_err(|e| MnemError::new_err(format!("hash node: {e}")))?;
+        let Some(se) = guard.sparse_for(&node_cid, vocab_id).map_err(map_core_err)? else {
+            return Ok(None);
+        };
+        let d = PyDict::new(py);
+        let indices: Vec<u32> = se.indices.clone();
+        let values: Vec<f32> = se.values.clone();
+        d.set_item("indices", indices)?;
+        d.set_item("values", values)?;
+        d.set_item("vocab_id", se.vocab_id.clone())?;
+        Ok(Some(d.into_any().unbind()))
+    }
+
+    /// Return `True` if a sparse embedding for `vocab_id` exists on the
+    /// given node, `False` otherwise (including when the node does not exist).
+    ///
+    /// Parameters
+    /// ----------
+    /// node_id : str
+    ///     Canonical UUID string of the node.
+    /// vocab_id : str
+    ///     Vocabulary identifier string.
+    pub fn has_sparse(&self, node_id: &str, vocab_id: &str) -> PyResult<bool> {
+        let id = NodeId::parse_uuid(node_id)
+            .map_err(|e| PyValueError::new_err(format!("invalid UUID: {e}")))?;
+        let guard = self.inner.lock().map_err(poison)?;
+        let Some(node) = guard.lookup_node(&id).map_err(map_core_err)? else {
+            return Ok(false);
+        };
+        let (_, node_cid) = mnem_core::codec::hash_to_cid(&node)
+            .map_err(|e| MnemError::new_err(format!("hash node: {e}")))?;
+        Ok(guard
+            .sparse_for(&node_cid, vocab_id)
+            .map_err(map_core_err)?
+            .is_some())
+    }
+
     /// Retrieve ranked, rendered nodes under a token budget. Returns a
     /// `RetrievalResult` whose `items` list is already packed to fit
     /// the budget in RRF-rank order.
@@ -1151,9 +1260,10 @@ mod global_repo_tests {
         let _guard = global_lock();
         let tmp = std::env::temp_dir()
             .join(format!("mnemtest_global_{}", std::process::id()));
-        std::env::set_var("MNEM_GLOBAL_DIR", &tmp);
+        // SAFETY: single-threaded test, guarded by global_lock()
+        unsafe { std::env::set_var("MNEM_GLOBAL_DIR", &tmp); }
         let result = Repo::open_global();
-        std::env::remove_var("MNEM_GLOBAL_DIR");
+        unsafe { std::env::remove_var("MNEM_GLOBAL_DIR"); }
         let repo = result.expect("open_global should succeed");
         let _op_id = repo.op_id().expect("op_id() should succeed");
         // Clean up
@@ -1163,9 +1273,10 @@ mod global_repo_tests {
     #[test]
     fn global_dir_path_returns_env_override() {
         let _guard = global_lock();
-        std::env::set_var("MNEM_GLOBAL_DIR", "/tmp/custom_global");
+        // SAFETY: single-threaded test, guarded by global_lock()
+        unsafe { std::env::set_var("MNEM_GLOBAL_DIR", "/tmp/custom_global"); }
         let path = Repo::global_dir_path();
-        std::env::remove_var("MNEM_GLOBAL_DIR");
+        unsafe { std::env::remove_var("MNEM_GLOBAL_DIR"); }
         assert_eq!(path, "/tmp/custom_global");
     }
 }

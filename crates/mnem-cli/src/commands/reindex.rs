@@ -40,6 +40,8 @@ Examples:
  mnem reindex --since <commit> # only nodes added/changed since <commit>
  mnem reindex --force # re-embed even already-embedded nodes
  mnem reindex --dry-run # report count without changing anything
+ mnem reindex --lift-legacy-extra # promote v0.3 inline embed bytes to sidecar
+ mnem reindex --lift-legacy-sparse # promote pre-G17 inline sparse_embed to sidecar
 
 Source text per node:
  - `summary` (the `-s` argument to `mnem add node`) when set
@@ -64,6 +66,20 @@ pub(crate) struct Args {
     /// Commit message (default: "mnem reindex: N nodes embedded").
     #[arg(long, short = 'm')]
     pub message: Option<String>,
+    /// Lift legacy v0.3 inline embeddings from `node.extra["embed"]` into the
+    /// sidecar (`Commit.embeddings`) without re-deriving from text. Mutually
+    /// exclusive with `--force`. Nodes that have no `extra["embed"]` key are
+    /// skipped (or fall through to the normal path when `--force` is also
+    /// set, but `--force` and `--lift-legacy-extra` cannot be combined).
+    #[arg(long)]
+    pub lift_legacy_extra: bool,
+    /// Lift pre-G17 inline sparse embeddings from `node.extra["sparse_embed"]`
+    /// into the sparse sidecar (`Commit.sparse`) without re-encoding from text.
+    /// Mutually exclusive with `--force`. Nodes that have no
+    /// `extra["sparse_embed"]` key are silently skipped. Run this once after
+    /// upgrading to v0.5 on a repo that was written with an earlier version.
+    #[arg(long)]
+    pub lift_legacy_sparse: bool,
 }
 
 /// Render a fallback source string for a node with no `summary`. Uses
@@ -135,14 +151,39 @@ fn nodes_at(
 }
 
 pub(crate) fn run(override_path: Option<&Path>, args: Args) -> Result<()> {
+    // Guard: --lift-legacy-extra / --lift-legacy-sparse and --force are mutually exclusive.
+    if args.lift_legacy_extra && args.force {
+        anyhow::bail!(
+            "--lift-legacy-extra and --force are mutually exclusive: \
+ --lift-legacy-extra promotes existing inline bytes without re-deriving; \
+ --force re-derives from text via the embedder. Pick one."
+        );
+    }
+    if args.lift_legacy_sparse && args.force {
+        anyhow::bail!(
+            "--lift-legacy-sparse and --force are mutually exclusive: \
+ --lift-legacy-sparse promotes existing inline bytes without re-encoding; \
+ --force re-derives from text via the embedder. Pick one."
+        );
+    }
+
+    // When --lift-legacy-extra or --lift-legacy-sparse is set we don't need
+    // a configured embedder. For the normal path we do.
+    let is_lift_only = args.lift_legacy_extra || args.lift_legacy_sparse;
     let data_dir = repo::locate_data_dir(override_path)?;
     let cfg = config::load(&data_dir)?;
-    let Some(pc) = config::resolve_embedder(&cfg) else {
-        anyhow::bail!(
-            "no embedder configured; run `mnem config set embed.provider <openai|ollama>` \
+
+    if !is_lift_only {
+        let Some(_pc) = config::resolve_embedder(&cfg) else {
+            anyhow::bail!(
+                "no embedder configured; run `mnem config set embed.provider <openai|ollama>` \
  and `mnem config set embed.model <name>` first"
-        );
-    };
+            );
+        };
+    }
+
+    // For the normal embed path we need the provider config to open the embedder.
+    let pc_opt = config::resolve_embedder(&cfg);
 
     let (_dir, r, bs, _ohs) = repo::open_all(Some(data_dir.as_path()))?;
     let Some(head) = r.head_commit() else {
@@ -160,10 +201,19 @@ pub(crate) fn run(override_path: Option<&Path>, args: Args) -> Result<()> {
         }
     };
 
-    // Open the embedder *after* the dry-run path has had a chance to
-    // bail without a network call. We still need its `model()` for
-    // the "already embedded" check though, so for non-dry-run we
-    // open it here and reuse below.
+    // --lift-legacy-extra path: scan nodes for extra["embed"] and lift
+    // them into the sidecar. No embedder needed.
+    if args.lift_legacy_extra {
+        return run_lift_legacy_extra(&r, &bs, head, since_set, &args, &cfg);
+    }
+
+    // --lift-legacy-sparse path: scan nodes for extra["sparse_embed"] and lift
+    // them into the sparse sidecar (Commit.sparse). No encoder needed.
+    if args.lift_legacy_sparse {
+        return run_lift_legacy_sparse(&r, &bs, head, since_set, &args, &cfg);
+    }
+
+    // Normal embed path: open the embedder.
     //
     // Strategy: always try to open. If `--dry-run` and the open
     // fails, we can still print the count using a placeholder model
@@ -171,6 +221,7 @@ pub(crate) fn run(override_path: Option<&Path>, args: Args) -> Result<()> {
     // Per spec, Ollama-unreachable on `mnem reindex` is a hard error
     // (the user explicitly asked to embed, unlike `mnem add node`
     // where embedding is incidental); this matches `mnem embed`.
+    let pc = pc_opt.expect("embedder config present (checked above)");
     let embedder_result = mnem_embed_providers::open(&pc);
     let (embedder, model_fq) = match (&embedder_result, args.dry_run) {
         (Ok(e), _) => {
@@ -309,6 +360,248 @@ pub(crate) fn run(override_path: Option<&Path>, args: Args) -> Result<()> {
         new_r.op_id()
     );
     Ok(())
+}
+
+/// `--lift-legacy-extra` path: walk HEAD nodes, find any that carry
+/// `extra["embed"]`, decode the `Embedding` from that IPLD value, and
+/// write it into the sidecar via `tx.set_embedding`. Nodes without the
+/// key are skipped entirely.
+fn run_lift_legacy_extra(
+    r: &mnem_core::repo::ReadonlyRepo,
+    bs: &std::sync::Arc<dyn mnem_core::store::Blockstore>,
+    head: &mnem_core::objects::Commit,
+    since_set: Option<HashSet<Cid>>,
+    args: &Args,
+    cfg: &crate::config::Config,
+) -> Result<()> {
+    use mnem_core::objects::node::Embedding;
+
+    let mut total_nodes: usize = 0;
+    let mut legacy_count: usize = 0;
+    let mut decode_errors: usize = 0;
+
+    // Collect (node_cid, embedding) pairs to lift.
+    let mut to_lift: Vec<(Cid, Embedding)> = Vec::new();
+
+    let cursor = Cursor::new(&**bs, &head.nodes)?;
+    for entry in cursor {
+        let (_k, node_cid) = entry?;
+        let bytes = bs
+            .get(&node_cid)?
+            .ok_or_else(|| anyhow!("node CID {node_cid} missing from store"))?;
+        let node: Node = from_canonical_bytes(&bytes)?;
+        total_nodes += 1;
+
+        // --since filter: skip nodes that were already present at that commit.
+        if let Some(set) = &since_set
+            && set.contains(&node_cid)
+        {
+            continue;
+        }
+
+        // --label filter.
+        if let Some(lbl) = &args.label
+            && &node.ntype != lbl
+        {
+            continue;
+        }
+
+        let Some(ipld_val) = node.extra.get("embed") else {
+            continue;
+        };
+
+        // Decode the Ipld value as an Embedding via DAG-CBOR round-trip.
+        // The legacy wire format encoded Embedding as a map; we re-encode
+        // the Ipld to bytes and decode as Embedding using the same codec.
+        let emb: Embedding = match decode_embedding_from_ipld(ipld_val) {
+            Ok(e) => e,
+            Err(err) => {
+                eprintln!(
+                    "warning: node {node_cid} has extra[\"embed\"] but decoding failed: \
+ {err}; skipping"
+                );
+                decode_errors += 1;
+                continue;
+            }
+        };
+
+        legacy_count += 1;
+        to_lift.push((node_cid, emb));
+    }
+
+    if args.dry_run {
+        println!(
+            "would lift {legacy_count} legacy inline embedding(s) to sidecar \
+ ({total_nodes} node(s) scanned, {decode_errors} decode error(s))"
+        );
+        return Ok(());
+    }
+
+    if to_lift.is_empty() {
+        println!(
+            "no nodes with extra[\"embed\"] found ({total_nodes} scanned); \
+ nothing to lift"
+        );
+        return Ok(());
+    }
+
+    let total = to_lift.len();
+    let started = Instant::now();
+    let mut tx = r.start_transaction();
+    for (node_cid, emb) in to_lift {
+        let model = emb.model.clone();
+        tx.set_embedding(node_cid, model, emb)?;
+    }
+
+    let msg = args.message.clone().unwrap_or_else(|| {
+        format!("mnem reindex --lift-legacy-extra: {total} embedding(s) promoted to sidecar")
+    });
+    let new_r = tx.commit(&crate::config::author_string(cfg), &msg)?;
+    println!(
+        "lifted {total} embedding(s) to sidecar in {:.1}s; committed as op {}",
+        started.elapsed().as_secs_f32(),
+        new_r.op_id()
+    );
+    if decode_errors > 0 {
+        eprintln!("warning: {decode_errors} node(s) had undecodable extra[\"embed\"] and were skipped");
+    }
+    Ok(())
+}
+
+/// Decode an [`Embedding`] from an [`Ipld`] value that was serialized
+/// via DAG-CBOR (the legacy v0.3 on-wire format for `node.embed`).
+/// We re-encode the `Ipld` value to DAG-CBOR bytes (using the same
+/// codec path as the rest of the stack) and decode into `Embedding`.
+fn decode_embedding_from_ipld(val: &Ipld) -> Result<mnem_core::objects::node::Embedding> {
+    use mnem_core::codec::{from_canonical_bytes, to_canonical_bytes};
+    let bytes = to_canonical_bytes(val)
+        .map_err(|e| anyhow!("CBOR re-encode of extra[\"embed\"] failed: {e}"))?;
+    let emb: mnem_core::objects::node::Embedding = from_canonical_bytes(&bytes)
+        .map_err(|e| anyhow!("decode of extra[\"embed\"] as Embedding failed: {e}"))?;
+    emb.validate().map_err(|e| anyhow!("extra[\"embed\"] Embedding invariant violated: {e:?}"))?;
+    Ok(emb)
+}
+
+/// `--lift-legacy-sparse` path: walk HEAD nodes, find any that carry
+/// `extra["sparse_embed"]` (written by pre-G17 versions), decode the
+/// `SparseEmbed` from that IPLD value, and write it into the sparse
+/// sidecar via `tx.set_sparse_embedding`. Nodes without the key are
+/// skipped entirely. Run once after upgrading a repo to v0.5.
+fn run_lift_legacy_sparse(
+    r: &mnem_core::repo::ReadonlyRepo,
+    bs: &std::sync::Arc<dyn mnem_core::store::Blockstore>,
+    head: &mnem_core::objects::Commit,
+    since_set: Option<HashSet<Cid>>,
+    args: &Args,
+    cfg: &crate::config::Config,
+) -> Result<()> {
+    use mnem_core::sparse::SparseEmbed;
+
+    let mut total_nodes: usize = 0;
+    let mut legacy_count: usize = 0;
+    let mut decode_errors: usize = 0;
+
+    // Collect (node_cid, sparse_embed) pairs to lift.
+    let mut to_lift: Vec<(Cid, SparseEmbed)> = Vec::new();
+
+    let cursor = Cursor::new(&**bs, &head.nodes)?;
+    for entry in cursor {
+        let (_k, node_cid) = entry?;
+        let bytes = bs
+            .get(&node_cid)?
+            .ok_or_else(|| anyhow!("node CID {node_cid} missing from store"))?;
+        let node: Node = from_canonical_bytes(&bytes)?;
+        total_nodes += 1;
+
+        // --since filter: skip nodes present at the earlier commit.
+        if let Some(set) = &since_set
+            && set.contains(&node_cid)
+        {
+            continue;
+        }
+
+        // --label filter.
+        if let Some(lbl) = &args.label
+            && &node.ntype != lbl
+        {
+            continue;
+        }
+
+        let Some(ipld_val) = node.extra.get("sparse_embed") else {
+            continue;
+        };
+
+        // Decode the Ipld value as a SparseEmbed via DAG-CBOR round-trip.
+        let se: SparseEmbed = match decode_sparse_embed_from_ipld(ipld_val) {
+            Ok(s) => s,
+            Err(err) => {
+                eprintln!(
+                    "warning: node {node_cid} has extra[\"sparse_embed\"] but decoding \
+ failed: {err}; skipping"
+                );
+                decode_errors += 1;
+                continue;
+            }
+        };
+
+        legacy_count += 1;
+        to_lift.push((node_cid, se));
+    }
+
+    if args.dry_run {
+        println!(
+            "would lift {legacy_count} legacy inline sparse embedding(s) to sidecar \
+ ({total_nodes} node(s) scanned, {decode_errors} decode error(s))"
+        );
+        return Ok(());
+    }
+
+    if to_lift.is_empty() {
+        println!(
+            "no nodes with extra[\"sparse_embed\"] found ({total_nodes} scanned); \
+ nothing to lift"
+        );
+        return Ok(());
+    }
+
+    let total = to_lift.len();
+    let started = Instant::now();
+    let mut tx = r.start_transaction();
+    for (node_cid, se) in to_lift {
+        let vocab_id = se.vocab_id.clone();
+        tx.set_sparse_embedding(node_cid, vocab_id, se)?;
+    }
+
+    let msg = args.message.clone().unwrap_or_else(|| {
+        format!(
+            "mnem reindex --lift-legacy-sparse: {total} sparse embedding(s) promoted to sidecar"
+        )
+    });
+    let new_r = tx.commit(&crate::config::author_string(cfg), &msg)?;
+    println!(
+        "lifted {total} sparse embedding(s) to sidecar in {:.1}s; committed as op {}",
+        started.elapsed().as_secs_f32(),
+        new_r.op_id()
+    );
+    if decode_errors > 0 {
+        eprintln!(
+            "warning: {decode_errors} node(s) had undecodable extra[\"sparse_embed\"] and \
+ were skipped"
+        );
+    }
+    Ok(())
+}
+
+/// Decode a [`SparseEmbed`] from an [`Ipld`] value that was serialized
+/// via DAG-CBOR (the pre-G17 on-wire format for `node.sparse_embed`).
+/// Re-encodes the `Ipld` to bytes and decodes as `SparseEmbed`.
+fn decode_sparse_embed_from_ipld(val: &Ipld) -> Result<mnem_core::sparse::SparseEmbed> {
+    use mnem_core::codec::{from_canonical_bytes, to_canonical_bytes};
+    let bytes = to_canonical_bytes(val)
+        .map_err(|e| anyhow!("CBOR re-encode of extra[\"sparse_embed\"] failed: {e}"))?;
+    let se: mnem_core::sparse::SparseEmbed = from_canonical_bytes(&bytes)
+        .map_err(|e| anyhow!("decode of extra[\"sparse_embed\"] as SparseEmbed failed: {e}"))?;
+    Ok(se)
 }
 
 #[cfg(test)]

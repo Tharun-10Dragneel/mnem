@@ -17,7 +17,7 @@
 //! pre-batching the section pass turns the
 //! Bible-scale walltime bottleneck (~1 sequential ORT call per
 //! section, dominated by long chapters) into a single ORT batch per
-//! file. Same vectors land in `Node.embed`; only the wall-time
+//! file. Same vectors land in the embedding sidecar (`Commit.embeddings`); only the wall-time
 //! changes.
 //!
 //! Relations returned by the statistical miner are mapped to the

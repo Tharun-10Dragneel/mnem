@@ -32,7 +32,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::ObjectError;
 use crate::id::NodeId;
-use crate::sparse::SparseEmbed;
 
 // ---------------- Dtype + Embedding ----------------
 
@@ -113,11 +112,13 @@ impl Embedding {
 /// See SPEC §4.1 and [the module docs](super). Construct via [`Node::new`]
 /// and add properties with the `with_*` fluent helpers.
 ///
-/// Node is `PartialEq` but not `Eq`: `sparse_embed` carries `Vec<f32>`
-/// whose values cannot be `Eq` (NaN). Use CID equality via
-/// `hash_to_cid` when you need a canonical identity check; field-wise
-/// `==` comparison still works for non-NaN data.
-#[derive(Clone, Debug, PartialEq)]
+/// Sparse embeddings live in the per-commit sidecar (`Commit.sparse`
+/// Prolly tree, keyed by NodeCid) rather than inline on `Node`. This
+/// keeps sparse bytes out of the canonical Node hash so vocabulary
+/// differences or encoder-version changes cannot perturb `NodeCid`.
+/// Legacy DAG-CBOR carrying an explicit `sparse_embed` map round-trips
+/// losslessly through the `extra` flatten sink, keeping NodeCids stable.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     /// Stable node identity. Survives content edits; edges reference this.
     pub id: NodeId,
@@ -133,16 +134,7 @@ pub struct Node {
     pub props: BTreeMap<String, Ipld>,
     /// Optional opaque payload (a document body, a file, …).
     pub content: Option<Bytes>,
-    /// Optional learned-sparse embedding . Produced
-    /// by a `SparseEncoder` adapter (`OpenSearch` neural-sparse-doc-v3-
-    /// distill, BGE-M3-sparse, etc.) and indexed by
-    /// `crate::index::sparse::SparseInvertedIndex::build_from_repo`.
-    ///
-    /// Additive: existing nodes with `sparse_embed = None` keep
-    /// byte-identical CIDs because the wire serializer omits the field
-    /// via `skip_serializing_if = "Option::is_none"`.
-    pub sparse_embed: Option<SparseEmbed>,
-    /// Optional contextualized-chunk prefix . An
+    /// Optional contextualized-chunk prefix. An
     /// LLM-generated one-sentence placement cue ("This paragraph is
     /// from Section 3 of a legal contract between Alice and Bob's
     /// employer...") stored alongside the node. The ingest pipeline
@@ -157,11 +149,12 @@ pub struct Node {
     ///
     /// Additive: existing nodes with `context_sentence = None` keep
     /// byte-identical CIDs (same `skip_serializing_if = "Option::is_none"`
-    /// pattern as `sparse_embed`).
+    /// pattern as other optional fields).
     pub context_sentence: Option<String>,
     /// Forward-compat extension map per SPEC §3.2 - holds fields this
     /// version doesn't recognize and preserves them on re-encode so signed
-    /// Nodes remain verifiable across version upgrades.
+    /// Nodes remain verifiable across version upgrades. Legacy `sparse_embed`
+    /// fields written before G17 land here and round-trip byte-identically.
     pub extra: BTreeMap<String, Ipld>,
 }
 
@@ -185,7 +178,6 @@ impl Node {
             summary: None,
             props: BTreeMap::new(),
             content: None,
-            sparse_embed: None,
             context_sentence: None,
             extra: BTreeMap::new(),
         }
@@ -217,14 +209,6 @@ impl Node {
     #[must_use]
     pub fn with_content(mut self, content: Bytes) -> Self {
         self.content = Some(content);
-        self
-    }
-
-    /// Attach a learned-sparse embedding. Consumed by the sparse lane in
-    /// `Retriever` via `crate::index::sparse::SparseInvertedIndex`.
-    #[must_use]
-    pub fn with_sparse_embed(mut self, sparse_embed: SparseEmbed) -> Self {
-        self.sparse_embed = Some(sparse_embed);
         self
     }
 
@@ -317,8 +301,6 @@ struct NodeWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     content: Option<Bytes>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sparse_embed: Option<SparseEmbed>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     context_sentence: Option<String>,
     // Forward-compat sink. Absorbs unknown keys including legacy `embed`
     // maps written before dense vectors moved to the sidecar; the
@@ -336,7 +318,6 @@ impl Serialize for Node {
             summary: self.summary.clone(),
             props: self.props.clone(),
             content: self.content.clone(),
-            sparse_embed: self.sparse_embed.clone(),
             context_sentence: self.context_sentence.clone(),
             extra: self.extra.clone(),
         }
@@ -360,7 +341,6 @@ impl<'de> Deserialize<'de> for Node {
             summary: wire.summary,
             props: wire.props,
             content: wire.content,
-            sparse_embed: wire.sparse_embed,
             context_sentence: wire.context_sentence,
             extra: wire.extra,
         })
@@ -426,7 +406,6 @@ mod tests {
             summary: None,
             props: BTreeMap::new(),
             content: None,
-            sparse_embed: None,
             context_sentence: None,
             extra: BTreeMap::new(),
         };
@@ -448,7 +427,6 @@ mod tests {
             summary: None,
             props: BTreeMap::new(),
             content: None,
-            sparse_embed: None,
             context_sentence: None,
             extra: BTreeMap::new(),
         };
@@ -570,19 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn node_sparse_embed_round_trips() {
-        let s = crate::sparse::SparseEmbed::new(vec![1, 5, 9], vec![0.5, 0.2, 0.1], "test-vocab")
-            .unwrap();
-        let n = Node::new(NodeId::from_bytes_raw([6u8; 16]), "Doc").with_sparse_embed(s.clone());
-        let bytes = to_canonical_bytes(&n).expect("encode");
-        let decoded: Node = from_canonical_bytes(&bytes).expect("decode");
-        assert_eq!(decoded.sparse_embed.as_ref(), Some(&s));
-        // Re-encode determinism: byte-identical.
-        let bytes2 = to_canonical_bytes(&decoded).expect("re-encode");
-        assert_eq!(bytes, bytes2);
-    }
-
-    #[test]
     fn node_context_sentence_round_trips() {
         let ctx = "This paragraph is from Section 3 of the 2024 lease.";
         let n = Node::new(NodeId::from_bytes_raw([9u8; 16]), "Paragraph")
@@ -614,31 +579,6 @@ mod tests {
         let (_, c1) = hash_to_cid(&base).unwrap();
         let (_, c2) = hash_to_cid(&with_ctx).unwrap();
         assert_ne!(c1, c2, "context_sentence must participate in the CID");
-    }
-
-    #[test]
-    fn node_sparse_embed_absent_not_emitted() {
-        // A node without sparse_embed must not emit "sparse_embed" on
-        // the wire. This is the property that keeps pre-schema-change
-        // CIDs stable when the field is not populated.
-        let n = Node::new(NodeId::from_bytes_raw([7u8; 16]), "Thing");
-        let bytes = to_canonical_bytes(&n).expect("encode");
-        assert!(
-            !bytes.windows(12).any(|w| w == b"sparse_embed"),
-            "absent sparse_embed should not appear on the wire"
-        );
-    }
-
-    #[test]
-    fn node_sparse_embed_participates_in_cid() {
-        // Two nodes identical except for sparse_embed must produce
-        // different CIDs - sparse_embed is content-hash-bearing.
-        let s = crate::sparse::SparseEmbed::new(vec![1], vec![1.0], "v").unwrap();
-        let n_with = Node::new(NodeId::from_bytes_raw([8u8; 16]), "Doc").with_sparse_embed(s);
-        let n_without = Node::new(NodeId::from_bytes_raw([8u8; 16]), "Doc");
-        let (_, c_with) = hash_to_cid(&n_with).unwrap();
-        let (_, c_without) = hash_to_cid(&n_without).unwrap();
-        assert_ne!(c_with, c_without);
     }
 
     #[test]

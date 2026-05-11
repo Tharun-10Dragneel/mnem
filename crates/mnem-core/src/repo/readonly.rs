@@ -16,7 +16,8 @@ use crate::codec::{from_canonical_bytes, hash_to_cid};
 use crate::error::{Error, RepoError, StoreError};
 use crate::id::{Cid, EdgeId, NodeId};
 use crate::objects::node::Embedding;
-use crate::objects::{Commit, Edge, EmbeddingBucket, Node, Operation, RefTarget, View};
+use crate::objects::{Commit, Edge, EmbeddingBucket, Node, Operation, RefTarget, SparseBucket, View};
+use crate::sparse::SparseEmbed;
 use crate::prolly::{self, ProllyKey};
 use crate::store::{Blockstore, OpHeadsStore};
 
@@ -285,6 +286,104 @@ impl ReadonlyRepo {
         };
         let bucket: EmbeddingBucket = decode_from_store(&*self.blockstore, &bucket_cid)?;
         Ok(bucket.get(model).cloned())
+    }
+
+    /// List every model identifier stored in the embedding sidecar for a
+    /// node, identified by its content-addressed `NodeCid`.
+    ///
+    /// Returns an empty `Vec` (not an error) when:
+    ///
+    /// - the repo has no commits yet,
+    /// - the head commit has no embedding sidecar (`embeddings = None`), or
+    /// - the sidecar has no bucket for this `NodeCid`.
+    ///
+    /// When a bucket exists, the model strings are returned in the bucket's
+    /// canonical lexicographic order (the same order they were sorted into
+    /// at write time by [`EmbeddingBucket::upsert`]).
+    ///
+    /// # Errors
+    ///
+    /// Store or codec errors while walking the Prolly tree or decoding the
+    /// bucket. A missing key is `Ok(vec![])`, not an error.
+    pub fn embedding_models_for(&self, node_cid: &Cid) -> Result<Vec<String>, Error> {
+        let Some(commit) = self.commit.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let Some(embeddings_root) = commit.embeddings.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let key = super::transaction::embedding_key_for_node_cid(node_cid);
+        let Some(bucket_cid) = prolly::lookup(&*self.blockstore, embeddings_root, &key)? else {
+            return Ok(Vec::new());
+        };
+        let bucket: EmbeddingBucket = decode_from_store(&*self.blockstore, &bucket_cid)?;
+        Ok(bucket.entries.iter().map(|e| e.model.clone()).collect())
+    }
+
+    /// Look up the sparse embedding for a node by its content-addressed
+    /// `NodeCid` and a vocabulary identifier, walking the
+    /// [`Commit::sparse`](crate::objects::Commit::sparse) Prolly sidecar.
+    /// Returns `None` when:
+    ///
+    /// - the repo has no commits yet,
+    /// - the head commit has no sparse sidecar (`sparse = None`),
+    /// - the sidecar tree has no entry for this `NodeCid`, or
+    /// - the bucket exists but does not carry a vector for the
+    /// requested `vocab_id`.
+    ///
+    /// # Errors
+    ///
+    /// Store or codec errors while walking the Prolly tree or decoding
+    /// the bucket. A missing key is `Ok(None)`, not an error.
+    pub fn sparse_for(
+        &self,
+        node_cid: &Cid,
+        vocab_id: &str,
+    ) -> Result<Option<SparseEmbed>, Error> {
+        let Some(commit) = self.commit.as_ref() else {
+            return Ok(None);
+        };
+        let Some(sparse_root) = commit.sparse.as_ref() else {
+            return Ok(None);
+        };
+        let key = super::transaction::sparse_key_for_node_cid(node_cid);
+        let Some(bucket_cid) = prolly::lookup(&*self.blockstore, sparse_root, &key)? else {
+            return Ok(None);
+        };
+        let bucket: SparseBucket = decode_from_store(&*self.blockstore, &bucket_cid)?;
+        Ok(bucket.get(vocab_id).cloned())
+    }
+
+    /// List every vocabulary identifier stored in the sparse sidecar for a
+    /// node, identified by its content-addressed `NodeCid`.
+    ///
+    /// Returns an empty `Vec` (not an error) when:
+    ///
+    /// - the repo has no commits yet,
+    /// - the head commit has no sparse sidecar (`sparse = None`), or
+    /// - the sidecar has no bucket for this `NodeCid`.
+    ///
+    /// When a bucket exists, the vocab strings are returned in lexicographic
+    /// order (the same order they were sorted into at write time by
+    /// [`SparseBucket::upsert`]).
+    ///
+    /// # Errors
+    ///
+    /// Store or codec errors while walking the Prolly tree or decoding the
+    /// bucket. A missing key is `Ok(vec![])`, not an error.
+    pub fn sparse_vocabs_for(&self, node_cid: &Cid) -> Result<Vec<String>, Error> {
+        let Some(commit) = self.commit.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let Some(sparse_root) = commit.sparse.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let key = super::transaction::sparse_key_for_node_cid(node_cid);
+        let Some(bucket_cid) = prolly::lookup(&*self.blockstore, sparse_root, &key)? else {
+            return Ok(Vec::new());
+        };
+        let bucket: SparseBucket = decode_from_store(&*self.blockstore, &bucket_cid)?;
+        Ok(bucket.entries.iter().map(|e| e.vocab_id.clone()).collect())
     }
 
     /// All outgoing edges from `src` in the current commit, optionally

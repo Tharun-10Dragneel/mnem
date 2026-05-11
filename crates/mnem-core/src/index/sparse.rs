@@ -164,14 +164,15 @@ impl SparseInvertedIndex {
             .collect())
     }
 
-    /// Build an index from all nodes in the current commit whose
-    /// `sparse_embed` field matches `vocab_id`. Requires the nodes to
-    /// have been indexed by an adapter at write time.
+    /// Build an index from all nodes in the current commit that have a
+    /// sparse embedding for `vocab_id` in the sparse-sidecar Prolly tree
+    /// (`Commit.sparse`). Nodes that have no sidecar entry for this
+    /// vocabulary are silently skipped.
     ///
     /// # Errors
     ///
     /// - [`RepoError::Uninitialized`] if the repo has no head commit.
-    /// - Store / codec errors while walking the Prolly tree.
+    /// - Store / codec errors while walking the Prolly tree or sidecar.
     pub fn build_from_repo(
         repo: &crate::repo::ReadonlyRepo,
         vocab_id: impl Into<String>,
@@ -186,12 +187,11 @@ impl SparseInvertedIndex {
         for entry in cursor {
             let (_k, node_cid) = entry?;
             let node: Node = decode_from_store(&*bs, &node_cid)?;
-            let Some(sparse) = &node.sparse_embed else {
+            // Read sparse embedding from the sidecar, not from node bytes.
+            let Some(sparse) = repo.sparse_for(&node_cid, &vocab_id)? else {
                 continue;
             };
-            if sparse.vocab_id == vocab_id {
-                idx.add(node.id, sparse);
-            }
+            idx.add(node.id, &sparse);
         }
         idx.finalize();
         Ok(idx)

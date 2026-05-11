@@ -16,6 +16,7 @@ pub mod embedding_set;
 pub mod index_set;
 pub mod node;
 pub mod operation;
+pub mod sparse_set;
 pub mod tombstone;
 pub mod view;
 
@@ -27,5 +28,6 @@ pub use index_set::{
 };
 pub use node::{Dtype, Embedding, Node};
 pub use operation::Operation;
+pub use sparse_set::{SparseBucket, SparseEntry};
 pub use tombstone::Tombstone;
 pub use view::{RefTarget, View};

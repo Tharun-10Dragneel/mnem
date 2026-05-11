@@ -21,7 +21,7 @@
 //! 200 chars`, `content = full chunk text` (raw bytes), and the
 //! reserved prop set `mnem:source_kind`, `mnem:section_path`,
 //! `mnem:created_at`. An optional [`Embedder`](EmbedderArc) produces
-//! an embedding that rides on `Node.embed`.
+//! an embedding written to the embedding sidecar (`Commit.embeddings`).
 //! 2. The extractor runs on every section that overlaps the chunk and
 //! emits entity spans. Each unique `(kind, canonical_text)` pair
 //! gets one graph entity `Node` per ingest run (deduped by a local
@@ -90,7 +90,8 @@ pub struct Ingester {
     /// [`RuleExtractor`] with the shipped defaults.
     pub extractor: Box<dyn Extractor>,
     /// Optional embedder. When `Some`, every chunk node receives an
-    /// [`mnem_core::objects::Embedding`] on `Node.embed`.
+    /// [`mnem_core::objects::Embedding`] in the embedding sidecar
+    /// (`Commit.embeddings`, keyed by `NodeCid`).
     pub embedder: Option<EmbedderArc>,
     /// Optional per-chunk progress callback. Fires after every chunk
     /// has been written into the transaction ().

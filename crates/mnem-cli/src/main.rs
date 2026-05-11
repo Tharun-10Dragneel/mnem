@@ -91,6 +91,21 @@ See `mnem add node --help` / `mnem add edge --help` for full options.
     /// Backfill embeddings for nodes that don't have one. Needs
     /// `embed.provider` + `embed.model` configured (see `mnem config`).
     Embed(commands::embed_cmd::Args),
+    /// Read embedding vectors from the sidecar.
+    ///
+    /// ```bash
+    /// mnem embedding get <node-uuid> <model>   # print vector as space-separated floats
+    /// mnem embedding ls  <node-uuid>           # list all stored model identifiers
+    /// ```
+    #[command(
+        subcommand,
+        after_long_help = "\
+Examples:
+  mnem embedding get <uuid> onnx:all-MiniLM-L6-v2   # print embedding vector
+  mnem embedding ls  <uuid>                          # list all models for a node
+"
+    )]
+    Embedding(commands::embedding_cmd::EmbeddingCmd),
     /// Retro-embed nodes that lack a vector. Like `mnem embed` but
     /// adds `--since <commit>` and a `label + props` fallback for
     /// nodes without a `--summary`. Promoted as the recovery path
@@ -429,6 +444,9 @@ fn main() {
         Some(Cmd::Query(args)) => commands::query::run(cli.repo.as_deref(), args),
         Some(Cmd::Retrieve(args)) => commands::retrieve::run(cli.repo.as_deref(), args),
         Some(Cmd::Embed(args)) => commands::embed_cmd::run(cli.repo.as_deref(), args),
+        Some(Cmd::Embedding(sub)) => {
+            commands::embedding_cmd::run(cli.repo.as_deref(), commands::embedding_cmd::EmbeddingArgs { cmd: sub })
+        }
         Some(Cmd::Reindex(args)) => commands::reindex::run(cli.repo.as_deref(), args),
         Some(Cmd::Embedder(sub)) => {
             commands::embed_cmd::run_embedder(commands::embed_cmd::EmbedderArgs { cmd: sub })

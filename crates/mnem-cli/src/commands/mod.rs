@@ -17,6 +17,7 @@ pub(crate) mod deferred;
 pub(crate) mod delete_node;
 pub(crate) mod diff;
 pub(crate) mod embed_cmd;
+pub(crate) mod embedding_cmd;
 pub(crate) mod export;
 pub(crate) mod fetch;
 pub(crate) mod fsck;

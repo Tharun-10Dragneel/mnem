@@ -30,7 +30,8 @@ use crate::id::{ChangeId, Cid, EdgeId, NodeId};
 use crate::index;
 use crate::objects::node::Embedding;
 use crate::objects::{
-    Commit, Edge, EmbeddingBucket, IndexSet, Node, Operation, RefTarget, Tombstone, View,
+    Commit, Edge, EmbeddingBucket, IndexSet, Node, Operation, RefTarget, SparseBucket, Tombstone,
+    View,
 };
 use crate::prolly::{self, Cursor, ProllyKey};
 use crate::store::Blockstore;
@@ -154,6 +155,11 @@ pub struct Transaction {
     /// rebuild entirely when this map is empty AND the base commit
     /// carried no `embeddings` root.
     pending_embeddings: BTreeMap<Cid, EmbeddingBucket>,
+    /// Pending sparse-sidecar writes, keyed by the content-addressed
+    /// `NodeCid` they reference. Multiple `set_sparse_embedding` calls
+    /// for the same node accumulate into one [`SparseBucket`] (one entry
+    /// per `vocab_id`). Same skip-rebuild semantics as `pending_embeddings`.
+    pending_sparse: BTreeMap<Cid, SparseBucket>,
     /// If set, this branch refname (e.g. `"refs/heads/main"`) will be
     /// written into `new_view.extra["active_branch"]` at commit time,
     /// overriding any inherited value from the base View.
@@ -175,6 +181,7 @@ impl Transaction {
             pending_by_prop: BTreeMap::new(),
             cached_base_indexes: None,
             pending_embeddings: BTreeMap::new(),
+            pending_sparse: BTreeMap::new(),
             active_branch_override: None,
         }
     }
@@ -246,8 +253,56 @@ impl Transaction {
         model: String,
         embedding: Embedding,
     ) -> Result<(), Error> {
+        if model.is_empty() {
+            return Err(crate::error::ObjectError::InvalidInput(
+                "model string must not be empty".to_string(),
+            )
+            .into());
+        }
         let bucket = self.pending_embeddings.entry(node_cid).or_default();
         bucket.upsert(model, embedding);
+        Ok(())
+    }
+
+    /// Stage a learned-sparse embedding for a previously-added node into
+    /// the sparse-sidecar Prolly tree referenced by `Commit.sparse`.
+    ///
+    /// Symmetric with [`Self::set_embedding`]: pass the `node_cid`
+    /// returned from `add_node`. Multiple calls for the same `node_cid`
+    /// accumulate into one [`SparseBucket`]; calling twice with the same
+    /// `vocab_id` upserts (the second value wins).
+    ///
+    /// The actual sidecar tree is built and committed by
+    /// [`Self::commit`] / [`Self::commit_opts`]; staging does not touch
+    /// the blockstore.
+    ///
+    /// # Why outside Node bytes
+    ///
+    /// Vocabulary differences and encoder-version changes affect the
+    /// non-zero indices and weights, so inlining the sparse vector on
+    /// `Node` would couple `NodeCid` to the encoder version and break
+    /// federated dedup. The sidecar separates identity (Node) from
+    /// derived bytes (SparseEmbed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::ObjectError::InvalidInput`] when
+    /// `vocab_id` is empty. Otherwise currently infallible; the
+    /// `Result` reserves space for future validation hooks.
+    pub fn set_sparse_embedding(
+        &mut self,
+        node_cid: Cid,
+        vocab_id: String,
+        sparse: crate::sparse::SparseEmbed,
+    ) -> Result<(), Error> {
+        if vocab_id.is_empty() {
+            return Err(crate::error::ObjectError::InvalidInput(
+                "vocab_id string must not be empty".to_string(),
+            )
+            .into());
+        }
+        let bucket = self.pending_sparse.entry(node_cid).or_default();
+        bucket.upsert(vocab_id, sparse);
         Ok(())
     }
 
@@ -280,6 +335,7 @@ impl Transaction {
     pub fn remove_node(&mut self, id: NodeId) {
         if let Some(cid) = self.new_nodes.remove(&id) {
             self.pending_embeddings.remove(&cid);
+            self.pending_sparse.remove(&cid);
         }
         self.removed_nodes.insert(id);
         // Drop any pending-by-prop entries pointing at this id.
@@ -641,6 +697,7 @@ impl Transaction {
             pending_by_prop: _,
             cached_base_indexes: _,
             pending_embeddings,
+            pending_sparse,
             active_branch_override,
         } = self;
 
@@ -700,6 +757,10 @@ impl Transaction {
             .iter()
             .map(|(id, cid)| (ProllyKey::from(*id), cid.clone()))
             .collect();
+        // Capture NodeId values before consuming `removed_nodes` into
+        // ProllyKey form. These are needed later to resolve NodeId -> NodeCid
+        // for embedding sidecar pruning (G18).
+        let removed_node_ids: Vec<NodeId> = removed_nodes.iter().copied().collect();
         let node_removals: HashSet<ProllyKey> =
             removed_nodes.into_iter().map(ProllyKey::from).collect();
         let new_nodes_root = rebuild_tree(&*bs, &base_nodes, &node_additions, &node_removals)?;
@@ -748,17 +809,35 @@ impl Transaction {
         };
 
         // Embedding sidecar (). Skip the rebuild entirely when no
-        // pending writes AND no base sidecar - most commits in a
-        // legacy repo will hit this fast path. Otherwise: encode each
-        // pending bucket, stage its CID under the 16-byte truncated
-        // blake3 of the NodeCid wire form (matches the lookup keying
-        // in `ReadonlyRepo::embedding_for`), and feed the additions
-        // through the same `rebuild_tree` helper the node + edge
-        // trees use.
+        // pending writes AND no base sidecar AND no node removals that could
+        // leave orphaned sidecar entries - most commits in a legacy repo will
+        // hit this fast path. Otherwise: encode each pending bucket, stage
+        // its CID under the 16-byte truncated blake3 of the NodeCid wire
+        // form (matches the lookup keying in `ReadonlyRepo::embedding_for`),
+        // prune sidecar entries for removed nodes (G18), and feed the
+        // additions and removals through the same `rebuild_tree` helper the
+        // node + edge trees use.
         let base_embeddings_cid: Option<Cid> =
             base.commit.as_deref().and_then(|c| c.embeddings.clone());
+        // Build the set of sidecar Prolly keys to remove: for each NodeId in
+        // `removed_node_ids`, resolve NodeId -> NodeCid via the base nodes
+        // tree, then derive the sidecar key. Failures are silently ignored --
+        // if we cannot resolve the NodeCid we simply cannot prune that entry,
+        // which is no worse than the pre-G18 behaviour.
+        let sidecar_removals: HashSet<ProllyKey> = removed_node_ids
+            .iter()
+            .filter_map(|node_id| {
+                let key = ProllyKey::from(*node_id);
+                prolly::lookup(&*bs, &base_nodes, &key)
+                    .ok()
+                    .flatten()
+                    .map(|node_cid| embedding_key_for_node_cid(&node_cid))
+            })
+            .collect();
         let new_embeddings_cid: Option<Cid> =
-            if pending_embeddings.is_empty() && base_embeddings_cid.is_none() {
+            if pending_embeddings.is_empty() && base_embeddings_cid.is_none()
+                && sidecar_removals.is_empty()
+            {
                 None
             } else {
                 let base_root = match &base_embeddings_cid {
@@ -772,7 +851,42 @@ impl Transaction {
                     let key = embedding_key_for_node_cid(&node_cid);
                     additions.insert(key, bucket_cid);
                 }
-                Some(rebuild_tree(&*bs, &base_root, &additions, &HashSet::new())?)
+                Some(rebuild_tree(&*bs, &base_root, &additions, &sidecar_removals)?)
+            };
+
+        // Sparse sidecar (G17). Same skip logic as the embedding sidecar:
+        // skip rebuild when no pending writes AND no base sidecar AND no
+        // node removals that leave orphaned entries.
+        let base_sparse_cid: Option<Cid> =
+            base.commit.as_deref().and_then(|c| c.sparse.clone());
+        let sparse_sidecar_removals: HashSet<ProllyKey> = removed_node_ids
+            .iter()
+            .filter_map(|node_id| {
+                let key = ProllyKey::from(*node_id);
+                prolly::lookup(&*bs, &base_nodes, &key)
+                    .ok()
+                    .flatten()
+                    .map(|node_cid| sparse_key_for_node_cid(&node_cid))
+            })
+            .collect();
+        let new_sparse_cid: Option<Cid> =
+            if pending_sparse.is_empty() && base_sparse_cid.is_none()
+                && sparse_sidecar_removals.is_empty()
+            {
+                None
+            } else {
+                let base_root = match &base_sparse_cid {
+                    Some(c) => c.clone(),
+                    None => prolly::build_tree(&*bs, std::iter::empty())?,
+                };
+                let mut additions: BTreeMap<ProllyKey, Cid> = BTreeMap::new();
+                for (node_cid, bucket) in pending_sparse {
+                    let (bucket_bytes, bucket_cid) = hash_to_cid(&bucket)?;
+                    bs.put_trusted(bucket_cid.clone(), bucket_bytes)?;
+                    let key = sparse_key_for_node_cid(&node_cid);
+                    additions.insert(key, bucket_cid);
+                }
+                Some(rebuild_tree(&*bs, &base_root, &additions, &sparse_sidecar_removals)?)
             };
 
         // Build the new Commit.
@@ -794,6 +908,7 @@ impl Transaction {
         );
         commit.indexes = Some(new_indexes_cid);
         commit.embeddings = new_embeddings_cid;
+        commit.sparse = new_sparse_cid;
         if let Some(prev_head) = base.view.heads.first() {
             commit = commit.with_parent(prev_head.clone());
         }
@@ -983,6 +1098,21 @@ fn rebuild_tree<B: Blockstore + ?Sized>(
 /// through this exact helper. Two callers that derive keys differently
 /// would silently miss each other's writes.
 pub(crate) fn embedding_key_for_node_cid(node_cid: &Cid) -> ProllyKey {
+    let h = blake3::hash(&node_cid.to_bytes());
+    let mut k = [0u8; 16];
+    k.copy_from_slice(&h.as_bytes()[..16]);
+    ProllyKey(k)
+}
+
+/// Derive the 16-byte Prolly key for the sparse-sidecar tree from a
+/// `NodeCid`. Uses the same blake3-truncate-to-16 derivation as
+/// [`embedding_key_for_node_cid`] but operates on the sparse sidecar
+/// tree (`Commit.sparse`) rather than the dense embedding sidecar.
+///
+/// Both [`Transaction::commit_opts`] (write side) and
+/// [`crate::repo::ReadonlyRepo::sparse_for`] (read side) MUST go
+/// through this exact helper.
+pub(crate) fn sparse_key_for_node_cid(node_cid: &Cid) -> ProllyKey {
     let h = blake3::hash(&node_cid.to_bytes());
     let mut k = [0u8; 16];
     k.copy_from_slice(&h.as_bytes()[..16]);
@@ -1644,6 +1774,114 @@ mod tests {
             "sidecar root must be insertion-order-invariant"
         );
         assert_eq!(cid_a, cid_c);
+    }
+
+    /// `set_embedding` must reject an empty model string so that sidecar
+    /// entries are always findable. An empty model key would silently insert
+    /// an unreachable entry (the HTTP handler and CLI both reject empty
+    /// model strings, but the core API was previously inconsistent).
+    #[test]
+    fn set_embedding_rejects_empty_model() {
+        let repo = new_repo();
+        let mut tx = repo.start_transaction();
+        let node = Node::new(NodeId::new_v7(), "Doc").with_summary("empty model guard test");
+        let node_cid = tx.add_node(&node).unwrap();
+        let emb = dummy_embedding("placeholder", 4);
+
+        let result = tx.set_embedding(node_cid, String::new(), emb);
+        assert!(
+            result.is_err(),
+            "set_embedding with empty model string must return Err"
+        );
+        // Confirm the error is the ObjectError::InvalidInput variant so callers
+        // can distinguish it from a blockstore or codec error.
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Object(crate::error::ObjectError::InvalidInput(_))
+            ),
+            "error must be ObjectError::InvalidInput"
+        );
+    }
+
+    // -------- G18: embedding sidecar pruning on remove_node --------
+
+    /// G18 regression: after committing a node with an embedding in commit A,
+    /// removing that node in commit B must prune the sidecar entry so that
+    /// `embedding_for` returns `None` against commit B.
+    #[test]
+    fn base_sidecar_entry_pruned_after_remove_node() {
+        let repo = new_repo();
+
+        // Commit A: add node X with an embedding.
+        let mut tx1 = repo.start_transaction();
+        let node_x = Node::new(NodeId::new_v7(), "Doc").with_summary("will be removed");
+        let cid_x = tx1.add_node(&node_x).unwrap();
+        let emb = dummy_embedding("test-model", 4);
+        tx1.set_embedding(cid_x.clone(), "test-model".into(), emb.clone())
+            .unwrap();
+        let r1 = tx1.commit("alice", "commit A: add node X + embedding").unwrap();
+
+        // Sanity: embedding is reachable in commit A.
+        assert_eq!(
+            r1.embedding_for(&cid_x, "test-model").unwrap(),
+            Some(emb.clone()),
+            "embedding must be present in commit A"
+        );
+
+        // Commit B: remove node X.
+        let mut tx2 = r1.start_transaction();
+        tx2.remove_node(node_x.id);
+        let r2 = tx2.commit("alice", "commit B: remove node X").unwrap();
+
+        // G18 invariant: embedding must be absent in commit B.
+        assert_eq!(
+            r2.embedding_for(&cid_x, "test-model").unwrap(),
+            None,
+            "embedding must be pruned from sidecar after remove_node (G18)"
+        );
+    }
+
+    /// G18 privacy invariant: PII in an embedding must not be reachable
+    /// after the owning node is removed, even after re-opening the repo
+    /// from the same blockstore (simulates process restart).
+    #[test]
+    fn remove_node_embedding_is_gone_privacy_invariant() {
+        let bs: Arc<dyn Blockstore> = Arc::new(MemoryBlockstore::new());
+        let ohs: Arc<dyn OpHeadsStore> = Arc::new(MemoryOpHeadsStore::new());
+        let repo = ReadonlyRepo::init(Arc::clone(&bs), Arc::clone(&ohs)).unwrap();
+
+        // Commit A: node Y with a "sensitive" embedding.
+        let mut tx1 = repo.start_transaction();
+        let node_y = Node::new(NodeId::new_v7(), "PII").with_summary("sensitive data");
+        let cid_y = tx1.add_node(&node_y).unwrap();
+        let sensitive_emb = dummy_embedding("privacy-model", 8);
+        tx1.set_embedding(cid_y.clone(), "privacy-model".into(), sensitive_emb.clone())
+            .unwrap();
+        let r1 = tx1.commit("alice", "add node with PII embedding").unwrap();
+
+        // Sanity: embedding present in commit A.
+        assert_eq!(
+            r1.embedding_for(&cid_y, "privacy-model").unwrap(),
+            Some(sensitive_emb.clone()),
+            "embedding must be present before removal"
+        );
+
+        // Commit B: remove node Y.
+        let mut tx2 = r1.start_transaction();
+        tx2.remove_node(node_y.id);
+        let _r2 = tx2.commit("alice", "delete node Y").unwrap();
+
+        // Re-open the repo from the same blockstore - simulates process restart.
+        // `open` reads the current op-head, which is now commit B's op.
+        let reopened = ReadonlyRepo::open(Arc::clone(&bs), Arc::clone(&ohs)).unwrap();
+
+        // Privacy invariant: the embedding must not be accessible.
+        assert_eq!(
+            reopened.embedding_for(&cid_y, "privacy-model").unwrap(),
+            None,
+            "embedding must be pruned and not accessible after node removal (G18 privacy)"
+        );
     }
 
     // -------- BUG-38: active branch tracking --------

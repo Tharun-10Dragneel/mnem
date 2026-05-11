@@ -113,7 +113,7 @@ impl ModelKind {
         "onnx/model.onnx"
     }
 
-    /// Canonical fq identifier stamped on every Node.embed. MUST stay
+    /// Canonical fq identifier written into the embedding sidecar. MUST stay
     /// stable across mnem versions: two embedders with the same
     /// `model()` output MUST produce vectors in the same semantic
     /// space, and mnem keys the vector index on this string.
@@ -359,7 +359,7 @@ impl OnnxSession {
         // `Embedding` bytes; ORT reductions are NOT deterministic
         // across thread counts (f32 is non-associative under
         // reordered sums) so a single-threaded default keeps
-        // `Node.embed` byte-stable across machines and replay
+        // the embedding sidecar byte-stable across machines and replay
         // tests. The substrate-level federated-graph contract
         // wants this.
         //
