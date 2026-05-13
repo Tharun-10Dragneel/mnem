@@ -1,6 +1,6 @@
 # mnem (Python)
 
-Python bindings for [mnem](https://github.com/Uranid/mnem) - git for knowledge graphs, with retrieval under a token budget.
+Python bindings for [mnem](https://github.com/Uranid/mnem) - Git for AI memory. A persistent, versioned memory layer for AI systems.
 
 ```bash
 pip install mnem-py

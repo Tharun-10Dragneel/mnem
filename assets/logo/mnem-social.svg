@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img"
-     aria-label="mnem - git for knowledge graphs">
+     aria-label="mnem - Git for AI Memory">
   <title>mnem social preview</title>
   <desc>Social / OpenGraph preview card. 1280x640. Warm cream background, slate diamond logo with rust corner joints and a faint teal accent stroke, wordmark, tagline, three-line description, four feature pills, rust accent bar, and repo URL. Padding 80px on all sides.</desc>
 
@@ -48,26 +48,25 @@
     <text x="640" y="195" font-size="160" font-weight="800" fill="#1f2a36" letter-spacing="-7">mnem</text>
 
     <!-- Tagline -->
-    <text x="640" y="261" font-size="44" font-weight="700" fill="#1f2a36" letter-spacing="-0.5">Git for knowledge graphs.</text>
+    <text x="640" y="261" font-size="44" font-weight="700" fill="#1f2a36" letter-spacing="-0.5">Git for AI Memory.</text>
 
-    <!-- Description: three lines, secondary slate. -->
-    <text x="640" y="316" font-size="24" font-weight="400" fill="#556070">Versioned, mergeable agent memory with hybrid</text>
-    <text x="640" y="343" font-size="24" font-weight="400" fill="#556070">GraphRAG retrieval. One MCP server, every agent.</text>
-    <text x="640" y="370" font-size="24" font-weight="400" fill="#556070">Single ~40 MB binary. Offline. WASM-clean.</text>
+    <!-- Subtitle: two lines matching banner -->
+    <text x="640" y="316" font-size="24" font-weight="400" fill="#556070">A persistent versioned memory layer for AI systems</text>
+    <text x="640" y="348" font-size="24" font-weight="400" fill="#7a8a9a">Hybrid GraphRAG retrieval · Runs entirely offline</text>
 
     <!-- Feature pills: rust outline, slate text. -->
     <g font-size="16" font-weight="600" fill="#1f2a36">
-      <rect x="640"  y="403" width="100" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
-      <text x="690"  y="427" text-anchor="middle">graphrag</text>
+      <rect x="640"  y="403" width="106" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
+      <text x="693"  y="427" text-anchor="middle">VERSIONED</text>
 
-      <rect x="754"  y="403" width="110" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
-      <text x="809"  y="427" text-anchor="middle">versioned</text>
+      <rect x="760"  y="403" width="108" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
+      <text x="814"  y="427" text-anchor="middle">MULTI-HOP</text>
 
-      <rect x="878"  y="403" width="74"  height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
-      <text x="915"  y="427" text-anchor="middle">mcp</text>
+      <rect x="882"  y="403" width="90"  height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
+      <text x="927"  y="427" text-anchor="middle">OFFLINE</text>
 
-      <rect x="966"  y="403" width="146" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
-      <text x="1039" y="427" text-anchor="middle">agent-memory</text>
+      <rect x="986"  y="403" width="150" height="36" rx="18" fill="none" stroke="#d1642b" stroke-width="1.5"/>
+      <text x="1061" y="427" text-anchor="middle">SINGLE BINARY</text>
     </g>
 
     <!-- Rust accent bar: visual anchor between tags and URL. -->

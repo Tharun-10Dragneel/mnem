@@ -29,7 +29,7 @@ mod wizard;
 #[command(
     name = "mnem",
     version,
-    about = "git for knowledge graphs - versioned, content-addressed, embeddable.",
+    about = "Git for AI memory. A persistent, versioned memory layer for AI systems.",
     long_about = None,
     propagate_version = true
 )]

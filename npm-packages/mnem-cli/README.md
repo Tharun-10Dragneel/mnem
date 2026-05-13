@@ -1,6 +1,6 @@
 # mnem-cli
 
-**Git for knowledge graphs**: versioned, content-addressed, embeddable agent memory.
+**Git for AI memory.** A persistent, versioned memory layer for AI systems.
 
 ## Install
 

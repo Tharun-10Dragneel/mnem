@@ -1,6 +1,6 @@
 # mnem-cli
 
-Command-line interface for mnem - git for knowledge graphs.
+Command-line interface for mnem - Git for AI memory.
 
 Ships the `mnem` binary: the Git-shaped porcelain that most users reach for
 first. The v0.2 surface covers `init / status / log / show / add / query /

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo/mnem-banner.svg" alt="mnem: Git for Knowledge Graphs" />
+<img src="assets/logo/mnem-banner.svg" alt="mnem: Git for AI Memory" />
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Uranid/mnem/ci.yml?style=for-the-badge&label=CI)](https://github.com/Uranid/mnem/actions/workflows/ci.yml)

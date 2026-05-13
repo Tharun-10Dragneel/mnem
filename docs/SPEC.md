@@ -1,7 +1,7 @@
 # mnem Format Specification
 
 Version: 0.1  
-Status: canonical — implementations MUST conform.
+Status: canonical - implementations MUST conform.
 
 Two independent implementations that follow this document must produce
 byte-identical objects for the same input. That property is the whole point.
@@ -49,7 +49,7 @@ serializing CIDs as strings (JSON values, CLI output, log lines).
 ### §2.3 Stable identifiers
 
 Named `NodeId`, `EdgeId`, `ChangeId`, `OperationId`. Encoded as **16-byte
-byte strings** (major type 2 in CBOR). They survive content mutations —
+byte strings** (major type 2 in CBOR). They survive content mutations -
 editing a node's text does not change its `NodeId`. Do not confuse stable
 identifiers with content-addressed CIDs.
 
@@ -69,7 +69,7 @@ Requirements:
 - Map keys MUST be sorted (lexicographic, as required by DAG-CBOR).
 - Integer encoding MUST use the smallest form.
 - Indefinite-length items are forbidden.
-- The `dagjson` representation is a debug/inspection format only — it is
+- The `dagjson` representation is a debug/inspection format only - it is
   never hashed, never stored as canonical content.
 
 ### §3.2 Forward-compatibility extension map
@@ -101,7 +101,7 @@ identical text but different embedding models share one CID.
 ### §4.2 Edge
 
 A directed labelled edge between two nodes. The hash of the edge does not
-depend on node properties — editing a node's text does not invalidate its
+depend on node properties - editing a node's text does not invalidate its
 outgoing edges.
 
 Fields: `id` (EdgeId), `src` (NodeId), `dst` (NodeId), `label` (string),
@@ -162,7 +162,7 @@ Implementations MUST preserve this sort order when writing chunks.
 
 A tombstone marks a node as logically deleted ("forget"). Tombstone-wins
 semantics apply: a tombstone always supersedes a live node entry. Tombstones
-are durable — they survive merges, compactions, and replica sync.
+are durable - they survive merges, compactions, and replica sync.
 
 ---
 
@@ -225,9 +225,9 @@ The root View CID is the sole ref in the initial state.
 
 `retrieve` fans out across up to three lanes and fuses ranked results:
 
-1. **Vector** — HNSW over per-commit sidecar embeddings.
-2. **Sparse** — BM25 / SPLADE (feature-gated; absent = disabled).
-3. **Graph** — n-hop traversal over authored edges, optional PPR scoring.
+1. **Vector** - HNSW over per-commit sidecar embeddings.
+2. **Sparse** - BM25 / SPLADE (feature-gated; absent = disabled).
+3. **Graph** - n-hop traversal over authored edges, optional PPR scoring.
 
 The `SPEC §retrieve.response-budget` governs the aggregate byte cap on
 returned content. Implementations MUST respect this budget.
